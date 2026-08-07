@@ -1,11 +1,11 @@
 import { Save, Settings2 } from 'lucide-react';
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { useEffect, useState, type FormEvent } from 'react';
 import type { AppSettings } from '../../../domain/model';
-import { useAuth } from '../../auth/AuthProvider';
+import { decodeSettings } from '../../../domain/firestore-validation';
 import { Card, Field, PageHeader, StatusBadge } from '../../../shared/components/Ui';
 import { useCollectionData } from '../../../shared/hooks/useCollectionData';
-import { getFirebaseServices } from '../../../shared/services/firebase';
+import { callBackend } from '../../../shared/services/callables';
+import { useAuth } from '../../auth/AuthContext';
 
 const defaults: AppSettings = {
   companyName: 'Enfriamatic · datos DEV',
@@ -20,11 +20,13 @@ const defaults: AppSettings = {
 };
 
 export function SettingsPage() {
-  const { profile } = useAuth();
-  const settings = useCollectionData<AppSettings & { id: string }>('settings');
+  const auth = useAuth();
+  const reauthenticate = (password: string) => auth.reauthenticate(password);
+  const settings = useCollectionData<AppSettings & { id: string }>('settings', decodeSettings);
   const [form, setForm] = useState(defaults);
   const [feedback, setFeedback] = useState('');
   const [saving, setSaving] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
   useEffect(() => {
     const app = settings.data.find((item) => item.id === 'app');
     if (app) setForm(app);
@@ -32,21 +34,13 @@ export function SettingsPage() {
 
   async function save(event: FormEvent) {
     event.preventDefault();
-    if (!profile) return;
     setSaving(true);
     setFeedback('');
     try {
-      await setDoc(
-        doc(getFirebaseServices().firestore, 'settings', 'app'),
-        {
-          ...form,
-          updatedAt: serverTimestamp(),
-          updatedBy: profile.uid,
-          schemaVersion: 1,
-        },
-        { merge: true },
-      );
-      setFeedback('Configuración DEV guardada.');
+      await reauthenticate(currentPassword);
+      await callBackend('updateAppSettings', form);
+      setFeedback('Configuración DEV guardada y auditada.');
+      setCurrentPassword('');
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : 'No fue posible guardar.');
     } finally {
@@ -124,6 +118,33 @@ export function SettingsPage() {
               rows={4}
               value={form.legalText}
               onChange={(event) => setForm({ ...form, legalText: event.target.value })}
+            />
+          </Field>
+          <Field label="Condiciones comerciales" hint="Una condición por línea.">
+            <textarea
+              rows={5}
+              value={form.commercialConditions.join('\n')}
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  commercialConditions: event.target.value
+                    .split('\n')
+                    .map((value) => value.trim())
+                    .filter(Boolean),
+                })
+              }
+            />
+          </Field>
+          <Field
+            label="Contraseña actual"
+            hint="Reautenticación obligatoria para configuración crítica."
+          >
+            <input
+              required
+              autoComplete="current-password"
+              type="password"
+              value={currentPassword}
+              onChange={(event) => setCurrentPassword(event.target.value)}
             />
           </Field>
           <div className="notice">

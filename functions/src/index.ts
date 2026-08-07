@@ -18,7 +18,19 @@ export const healthCheck = onRequest(
 );
 
 export { createServiceRequest } from './create-request.js';
-export { getPrivateDownloadUrl, uploadPrivateFile } from './files.js';
+export {
+  downloadPrivateFile,
+  listPrivateFiles,
+  removePrivateFile,
+  uploadPrivateFile,
+} from './files.js';
 export { assignServiceRequest } from './requests.js';
-export { createQuoteRevision, issueQuote } from './quotes.js';
+export {
+  saveOperationalResource,
+  setOperationalResourceActive,
+  updateAppSettings,
+  updateRequestProgress,
+} from './resources.js';
+export { createQuoteDraft, createQuoteRevision, issueQuote, updateQuoteStatus } from './quotes.js';
 export { createManagedUser, updateManagedUser } from './users.js';
+export { createDueNotifications } from './notifications.js';

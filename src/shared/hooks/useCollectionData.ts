@@ -1,11 +1,6 @@
-import {
-  collection,
-  onSnapshot,
-  query,
-  type DocumentData,
-  type QueryConstraint,
-} from 'firebase/firestore';
+import { collection, onSnapshot, query, type QueryConstraint } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
+import type { DocumentDecoder } from '../../domain/firestore-validation';
 import { getFirebaseServices } from '../services/firebase';
 
 interface CollectionState<T> {
@@ -18,6 +13,7 @@ const noConstraints: QueryConstraint[] = [];
 
 export function useCollectionData<T>(
   path: string,
+  decoder: DocumentDecoder<T>,
   constraints: QueryConstraint[] = noConstraints,
 ): CollectionState<T> {
   const [state, setState] = useState<CollectionState<T>>({
@@ -33,18 +29,14 @@ export function useCollectionData<T>(
       reference,
       (snapshot) => {
         setState({
-          data: snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as T),
+          data: snapshot.docs.map((item) => decoder(item.id, item.data())),
           loading: false,
           error: null,
         });
       },
       (error) => setState({ data: [], loading: false, error: error.message }),
     );
-  }, [constraints, path]);
+  }, [constraints, decoder, path]);
 
   return state;
-}
-
-export function documentData<T>(value: DocumentData | undefined): T | null {
-  return value ? (value as T) : null;
 }

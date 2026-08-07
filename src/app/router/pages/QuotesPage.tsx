@@ -1,8 +1,6 @@
 import { FilePlus2, FileText, Search } from 'lucide-react';
-import { where } from 'firebase/firestore';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { Quote } from '../../../domain/model';
 import {
   Card,
   EmptyState,
@@ -11,20 +9,10 @@ import {
   PageHeader,
   StatusBadge,
 } from '../../../shared/components/Ui';
-import { useCollectionData } from '../../../shared/hooks/useCollectionData';
-import { useAuth, useOperationalProfile } from '../../auth/AuthProvider';
+import { useAuthorizedQuotes } from '../../../shared/hooks/useAuthorizedQuotes';
 
 export function QuotesPage() {
-  const { profile } = useAuth();
-  const operational = useOperationalProfile();
-  const quoteScope = useMemo(
-    () =>
-      operational === 'primary_admin' || operational === 'promoted_admin'
-        ? []
-        : [where('createdBy', '==', profile?.uid ?? '')],
-    [operational, profile?.uid],
-  );
-  const quotes = useCollectionData<Quote>('quotes', quoteScope);
+  const quotes = useAuthorizedQuotes();
   const [search, setSearch] = useState('');
   const visible = useMemo(
     () =>

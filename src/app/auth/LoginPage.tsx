@@ -1,6 +1,6 @@
 import { LockKeyhole, ShieldCheck, Snowflake } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
-import { useAuth } from './AuthProvider';
+import { useAuth } from './AuthContext';
 
 function authMessage(error: unknown): string {
   const code =

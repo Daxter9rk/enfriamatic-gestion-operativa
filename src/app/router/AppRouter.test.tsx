@@ -15,7 +15,7 @@ const state = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('../auth/AuthProvider', () => ({
+vi.mock('../auth/AuthContext', () => ({
   useAuth: () => state.auth,
   useOperationalProfile: () => {
     const profile = state.auth.profile;
@@ -29,6 +29,14 @@ vi.mock('../auth/AuthProvider', () => ({
 
 vi.mock('../../shared/hooks/useCollectionData', () => ({
   useCollectionData: () => ({ data: [], loading: false, error: null }),
+}));
+
+vi.mock('../../shared/hooks/useAuthorizedRequests', () => ({
+  useAuthorizedRequests: () => ({ data: [], loading: false, error: null }),
+}));
+
+vi.mock('../../shared/hooks/useAuthorizedQuotes', () => ({
+  useAuthorizedQuotes: () => ({ data: [], loading: false, error: null }),
 }));
 
 function activeProfile(role: 'admin' | 'operator', isPrimaryAdmin = false) {
@@ -66,11 +74,11 @@ describe('AppRouter', () => {
     expect(screen.getByRole('heading', { name: /Inicia sesi/i })).toBeInTheDocument();
   });
 
-  it('renders the administrator dashboard and navigation', () => {
+  it('renders the administrator dashboard and navigation', async () => {
     state.auth.user = { uid: 'admin-1' };
     state.auth.profile = activeProfile('admin', true);
     renderRoute('/');
-    expect(screen.getByRole('heading', { name: /Panel de control/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /Panel de control/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Usuarios y estructura/i })).toBeInTheDocument();
   });
 
@@ -81,10 +89,10 @@ describe('AppRouter', () => {
     expect(screen.getByRole('heading', { name: 'Permiso insuficiente' })).toBeInTheDocument();
   });
 
-  it('renders the not found state for an unknown route', () => {
+  it('renders the not found state for an unknown route', async () => {
     state.auth.user = { uid: 'admin-1' };
     state.auth.profile = activeProfile('admin', true);
     renderRoute('/ruta-inexistente');
-    expect(screen.getByText(/no existe/i)).toBeInTheDocument();
+    expect(await screen.findByText(/no existe/i)).toBeInTheDocument();
   });
 });

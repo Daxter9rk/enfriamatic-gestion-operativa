@@ -1,6 +1,8 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { db } from './admin.js';
+import { assertAuthorized, assertRequestRelations } from './authorization.js';
+import { parseProfile } from './contracts.js';
 import { auditRecord, objectData, optionalText, requireActor, text } from './security.js';
 
 const serviceTypes = new Set([
@@ -27,7 +29,9 @@ export const createServiceRequest = onCall(
     const quoteRequirement = text(data.quoteRequirement, 'quoteRequirement', 20);
     const requestedDate = text(data.requestedDate, 'requestedDate', 10);
     const description = text(data.description, 'description', 2000);
-    const assigneeId = optionalText(data.assigneeId, 'assigneeId', 128);
+    const requestedAssigneeId = optionalText(data.assigneeId, 'assigneeId', 128);
+    const assigneeId =
+      actor.role === 'operator' ? (requestedAssigneeId ?? actor.uid) : requestedAssigneeId;
     if (
       !serviceTypes.has(serviceType) ||
       !priorities.has(priority) ||
@@ -39,28 +43,56 @@ export const createServiceRequest = onCall(
     const requestRef = db.collection('requests').doc();
     const year = new Date().getUTCFullYear();
     await db.runTransaction(async (transaction) => {
-      const [settingsSnapshot, clientSnapshot, siteSnapshot] = await Promise.all([
-        transaction.get(db.collection('settings').doc('app')),
-        transaction.get(db.collection('clients').doc(clientId)),
-        transaction.get(db.collection('sites').doc(siteId)),
-      ]);
+      const [settingsSnapshot, clientSnapshot, siteSnapshot, equipmentSnapshot] = await Promise.all(
+        [
+          transaction.get(db.collection('settings').doc('app')),
+          transaction.get(db.collection('clients').doc(clientId)),
+          transaction.get(db.collection('sites').doc(siteId)),
+          equipmentId
+            ? transaction.get(db.collection('equipment').doc(equipmentId))
+            : Promise.resolve(null),
+        ],
+      );
       if (!clientSnapshot.exists || !siteSnapshot.exists) {
         throw new HttpsError('failed-precondition', 'Cliente o instalación no disponible.');
       }
-      let assignee: Record<string, unknown> | null = null;
+      if (clientSnapshot.get('active') === false || siteSnapshot.get('active') === false) {
+        throw new HttpsError('failed-precondition', 'Cliente o instalación inactivos.');
+      }
+      const siteClientId: unknown = siteSnapshot.get('clientId');
+      if (typeof siteClientId !== 'string') {
+        throw new HttpsError('data-loss', 'La instalación no tiene un cliente válido.');
+      }
+      let equipmentRelation: { clientId: string; siteId: string } | null = null;
+      if (equipmentId) {
+        if (!equipmentSnapshot?.exists || equipmentSnapshot.get('active') === false) {
+          throw new HttpsError('failed-precondition', 'El equipo no está disponible.');
+        }
+        const equipmentClientId: unknown = equipmentSnapshot.get('clientId');
+        const equipmentSiteId: unknown = equipmentSnapshot.get('siteId');
+        if (typeof equipmentClientId !== 'string' || typeof equipmentSiteId !== 'string') {
+          throw new HttpsError('data-loss', 'El equipo tiene relaciones inválidas.');
+        }
+        equipmentRelation = { clientId: equipmentClientId, siteId: equipmentSiteId };
+      }
+      assertRequestRelations({ clientId, siteId, equipmentId }, siteClientId, equipmentRelation);
+
+      let assignee: ReturnType<typeof parseProfile> | null = null;
       if (assigneeId) {
         const assigneeSnapshot = await transaction.get(db.collection('users').doc(assigneeId));
-        assignee = assigneeSnapshot.data() ?? null;
-        if (!assignee || assignee.role !== 'operator' || assignee.status !== 'active') {
+        if (!assigneeSnapshot.exists) {
+          throw new HttpsError('failed-precondition', 'El responsable no existe.');
+        }
+        assignee = parseProfile(assigneeSnapshot.id, assigneeSnapshot.data());
+        if (assignee.role !== 'operator' || assignee.status !== 'active') {
           throw new HttpsError('failed-precondition', 'El responsable debe ser operador activo.');
         }
-        if (
-          actor.role !== 'admin' &&
-          actor.uid !== assigneeId &&
-          (assignee.supervisorId !== actor.uid || assignee.teamId !== actor.teamId)
-        ) {
-          throw new HttpsError('permission-denied', 'No puedes asignar fuera de tu equipo.');
-        }
+        assertAuthorized(
+          actor.role === 'admin' ||
+            actor.uid === assigneeId ||
+            (assignee.supervisorId === actor.uid && assignee.teamId === actor.teamId),
+          'No puedes asignar fuera de tu equipo.',
+        );
       }
       const counterRef = db.collection('counters').doc(`requests-${year}`);
       const counter = await transaction.get(counterRef);

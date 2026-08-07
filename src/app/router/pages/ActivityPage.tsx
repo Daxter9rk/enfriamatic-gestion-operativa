@@ -1,8 +1,9 @@
 import { Activity, Bell, CheckCheck } from 'lucide-react';
-import { doc, serverTimestamp, updateDoc, where } from 'firebase/firestore';
+import { doc, serverTimestamp, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { useMemo } from 'react';
-import type { AuditLog, Notification } from '../../../domain/model';
-import { useAuth } from '../../auth/AuthProvider';
+import type { Notification } from '../../../domain/model';
+import { decodeNotification, formatTimestamp } from '../../../domain/firestore-validation';
+import { useAuth } from '../../auth/AuthContext';
 import {
   Card,
   EmptyState,
@@ -12,20 +13,21 @@ import {
   StatusBadge,
 } from '../../../shared/components/Ui';
 import { useCollectionData } from '../../../shared/hooks/useCollectionData';
+import { useAuthorizedAuditLogs } from '../../../shared/hooks/useAuthorizedAuditLogs';
 import { getFirebaseServices } from '../../../shared/services/firebase';
 
 export function ActivityPage() {
   const { profile } = useAuth();
-  const logScope = useMemo(
-    () => (profile?.role === 'admin' ? [] : [where('actorId', '==', profile?.uid ?? '')]),
-    [profile?.role, profile?.uid],
-  );
   const notificationScope = useMemo(
     () => [where('userId', '==', profile?.uid ?? '')],
     [profile?.uid],
   );
-  const logs = useCollectionData<AuditLog & { id: string }>('auditLogs', logScope);
-  const notifications = useCollectionData<Notification>('notifications', notificationScope);
+  const logs = useAuthorizedAuditLogs();
+  const notifications = useCollectionData<Notification>(
+    'notifications',
+    decodeNotification,
+    notificationScope,
+  );
   if (logs.loading || notifications.loading) return <LoadingState />;
   if (logs.error) return <ErrorState message={logs.error} />;
   const myNotifications = notifications.data.filter((item) => item.userId === profile?.uid);
@@ -34,6 +36,15 @@ export function ActivityPage() {
       readAt: serverTimestamp(),
     });
   }
+  async function markAll() {
+    const batch = writeBatch(getFirebaseServices().firestore);
+    for (const item of myNotifications.filter((notification) => !notification.readAt)) {
+      batch.update(doc(getFirebaseServices().firestore, 'notifications', item.id), {
+        readAt: serverTimestamp(),
+      });
+    }
+    await batch.commit();
+  }
   return (
     <div className="page-stack">
       <PageHeader
@@ -41,7 +52,16 @@ export function ActivityPage() {
         description="Trazabilidad visible según tu alcance. Los registros críticos son append-only y se crean en backend."
       />
       <section className="detail-grid">
-        <Card title="Notificaciones">
+        <Card
+          title="Notificaciones"
+          action={
+            myNotifications.some((item) => !item.readAt) ? (
+              <button className="button button-secondary" onClick={() => void markAll()}>
+                <CheckCheck size={17} /> Marcar todas
+              </button>
+            ) : undefined
+          }
+        >
           {myNotifications.length === 0 ? (
             <EmptyState
               icon={Bell}
@@ -91,7 +111,7 @@ export function ActivityPage() {
                       {item.resource} · {item.resourceId}
                     </small>
                   </div>
-                  <span>{String(item.createdAt ?? '')}</span>
+                  <span>{formatTimestamp(item.createdAt)}</span>
                 </li>
               ))}
             </ul>

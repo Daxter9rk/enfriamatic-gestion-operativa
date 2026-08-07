@@ -2,10 +2,13 @@ import { AlertTriangle, ClipboardCheck, Clock3, FileText, ListTodo, Users } from
 import { where } from 'firebase/firestore';
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { useAuth, useOperationalProfile } from '../../auth/AuthProvider';
-import type { Quote, ServiceRequest, UserProfile } from '../../../domain/model';
+import { useAuth, useOperationalProfile } from '../../auth/AuthContext';
+import type { UserProfile } from '../../../domain/model';
+import { decodeUserProfile } from '../../../domain/firestore-validation';
 import { isOverdue } from '../../../domain/requests';
 import { useCollectionData } from '../../../shared/hooks/useCollectionData';
+import { useAuthorizedQuotes } from '../../../shared/hooks/useAuthorizedQuotes';
+import { useAuthorizedRequests } from '../../../shared/hooks/useAuthorizedRequests';
 import {
   Card,
   ErrorState,
@@ -35,19 +38,6 @@ export function DashboardPage() {
   const { profile } = useAuth();
   const operationalProfile = useOperationalProfile();
   const isAdmin = operationalProfile === 'primary_admin' || operationalProfile === 'promoted_admin';
-  const requestScope = useMemo(
-    () =>
-      isAdmin
-        ? []
-        : operationalProfile === 'supervisor'
-          ? [where('supervisorId', '==', profile?.uid ?? '')]
-          : [where('assigneeId', '==', profile?.uid ?? '')],
-    [isAdmin, operationalProfile, profile?.uid],
-  );
-  const ownScope = useMemo(
-    () => (isAdmin ? [] : [where('createdBy', '==', profile?.uid ?? '')]),
-    [isAdmin, profile?.uid],
-  );
   const userScope = useMemo(
     () =>
       isAdmin
@@ -57,21 +47,14 @@ export function DashboardPage() {
           : [where('uid', '==', profile?.uid ?? '')],
     [isAdmin, operationalProfile, profile?.uid],
   );
-  const requests = useCollectionData<ServiceRequest>('requests', requestScope);
-  const quotes = useCollectionData<Quote>('quotes', ownScope);
-  const users = useCollectionData<UserProfile>('users', userScope);
+  const requests = useAuthorizedRequests();
+  const quotes = useAuthorizedQuotes();
+  const users = useCollectionData<UserProfile>('users', decodeUserProfile, userScope);
 
   if (requests.loading || quotes.loading || users.loading) return <LoadingState />;
   if (requests.error) return <ErrorState message={requests.error} />;
 
-  const visibleRequests =
-    operationalProfile === 'operator'
-      ? requests.data.filter((item) => item.assigneeId === profile?.uid)
-      : operationalProfile === 'supervisor'
-        ? requests.data.filter(
-            (item) => item.assigneeId === profile?.uid || item.supervisorId === profile?.uid,
-          )
-        : requests.data;
+  const visibleRequests = requests.data;
   const open = visibleRequests.filter(
     (item) => item.status !== 'completed' && item.status !== 'cancelled',
   );

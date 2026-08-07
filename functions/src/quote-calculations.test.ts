@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculateLine, totals } from './quote-calculations.js';
+import { calculateLine, totals } from '../../src/domain/quote-calculations.js';
 
 describe('revalidación backend de cotizaciones', () => {
   it('recalcula los importes y no confía en totales del navegador', () => {

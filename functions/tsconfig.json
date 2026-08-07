@@ -5,7 +5,7 @@
     "target": "ES2022",
     "lib": ["ES2022"],
     "outDir": "lib",
-    "rootDir": "src",
+    "rootDir": "..",
     "strict": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
@@ -15,5 +15,5 @@
     "sourceMap": true,
     "declaration": true
   },
-  "include": ["src"]
+  "include": ["src", "../src/domain/quote-calculations.ts"]
 }

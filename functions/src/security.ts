@@ -1,17 +1,10 @@
 import type { CallableRequest } from 'firebase-functions/v2/https';
 import { HttpsError } from 'firebase-functions/v2/https';
+import { FieldValue } from 'firebase-admin/firestore';
 import { db } from './admin.js';
+import { parseProfile, type ProfileRecord } from './contracts.js';
 
-export type Role = 'admin' | 'operator';
-export interface Actor {
-  uid: string;
-  role: Role;
-  status: 'active' | 'inactive' | 'pending' | 'suspended';
-  supervisorId: string | null;
-  teamId: string | null;
-  isPrimaryAdmin: boolean;
-  email: string;
-}
+export type Actor = ProfileRecord;
 
 export function text(value: unknown, field: string, maximum = 250): string {
   if (typeof value !== 'string') throw new HttpsError('invalid-argument', `${field} es requerido.`);
@@ -38,22 +31,11 @@ export async function requireActor(request: CallableRequest<unknown>): Promise<A
   if (!request.auth) throw new HttpsError('unauthenticated', 'Inicia sesión para continuar.');
   const snapshot = await db.collection('users').doc(request.auth.uid).get();
   if (!snapshot.exists) throw new HttpsError('permission-denied', 'El perfil no existe.');
-  const data = snapshot.data() as Partial<Actor>;
-  if (data.status !== 'active') {
-    throw new HttpsError('permission-denied', `El perfil está ${data.status ?? 'incompleto'}.`);
+  const actor = parseProfile(snapshot.id, snapshot.data());
+  if (actor.status !== 'active') {
+    throw new HttpsError('permission-denied', `El perfil está ${actor.status}.`);
   }
-  if (data.role !== 'admin' && data.role !== 'operator') {
-    throw new HttpsError('permission-denied', 'El rol no es válido.');
-  }
-  return {
-    uid: request.auth.uid,
-    role: data.role,
-    status: data.status,
-    supervisorId: data.supervisorId ?? null,
-    teamId: data.teamId ?? null,
-    isPrimaryAdmin: data.isPrimaryAdmin === true,
-    email: request.auth.token.email ?? '',
-  };
+  return actor;
 }
 
 export function requireAdmin(actor: Actor): void {
@@ -94,7 +76,7 @@ export function auditRecord(
     before: before ?? null,
     after: after ?? null,
     metadata: {},
-    createdAt: new Date().toISOString(),
+    createdAt: FieldValue.serverTimestamp(),
     schemaVersion: 1,
   };
 }

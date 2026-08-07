@@ -1,56 +1,19 @@
 import {
   browserLocalPersistence,
+  EmailAuthProvider,
   onAuthStateChanged,
+  reauthenticateWithCredential,
   setPersistence,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
   type User,
 } from 'firebase/auth';
 import { doc, getDoc, getDocs, limit, query, collection, where } from 'firebase/firestore';
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type PropsWithChildren,
-} from 'react';
+import { useEffect, useMemo, useState, type PropsWithChildren } from 'react';
 import type { UserProfile } from '../../domain/model';
-import { resolveOperationalProfile } from '../../domain/permissions';
+import { decodeUserProfile } from '../../domain/firestore-validation';
 import { getFirebaseServices } from '../../shared/services/firebase';
-
-type SessionProblem =
-  'profile_missing' | 'pending' | 'inactive' | 'suspended' | 'invalid_role' | 'revoked' | null;
-
-interface AuthContextValue {
-  user: User | null;
-  profile: UserProfile | null;
-  hasDirectReports: boolean;
-  loading: boolean;
-  problem: SessionProblem;
-  login(email: string, password: string): Promise<void>;
-  logout(): Promise<void>;
-}
-
-const AuthContext = createContext<AuthContextValue | null>(null);
-function stringValue(value: unknown, fallback: string): string {
-  return typeof value === 'string' ? value : fallback;
-}
-
-function normalizeProfile(uid: string, data: Record<string, unknown>): UserProfile | null {
-  if (data.role !== 'admin' && data.role !== 'operator') return null;
-  if (!['active', 'inactive', 'pending', 'suspended'].includes(String(data.status))) return null;
-  return {
-    uid,
-    email: stringValue(data.email, ''),
-    displayName: stringValue(data.displayName, 'Usuario DEV'),
-    role: data.role,
-    status: data.status as UserProfile['status'],
-    supervisorId: typeof data.supervisorId === 'string' ? data.supervisorId : null,
-    teamId: typeof data.teamId === 'string' ? data.teamId : null,
-    isPrimaryAdmin: data.isPrimaryAdmin === true,
-  };
-}
+import { AuthContext, type AuthContextValue, type SessionProblem } from './AuthContext';
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const { auth, firestore } = getFirebaseServices();
@@ -81,8 +44,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
               setProblem('profile_missing');
               return;
             }
-            const normalized = normalizeProfile(currentUser.uid, snapshot.data());
-            if (!normalized) {
+            let normalized: UserProfile;
+            try {
+              normalized = decodeUserProfile(currentUser.uid, snapshot.data());
+            } catch {
               setProblem('invalid_role');
               return;
             }
@@ -129,20 +94,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
       async logout() {
         await firebaseSignOut(auth);
       },
+      async reauthenticate(password) {
+        if (!auth.currentUser?.email) throw new Error('No existe una sesión con correo.');
+        await reauthenticateWithCredential(
+          auth.currentUser,
+          EmailAuthProvider.credential(auth.currentUser.email, password),
+        );
+      },
     }),
     [auth, hasDirectReports, loading, problem, profile, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-export function useAuth(): AuthContextValue {
-  const context = useContext(AuthContext);
-  if (!context) throw new Error('useAuth requiere AuthProvider.');
-  return context;
-}
-
-export function useOperationalProfile() {
-  const { profile, hasDirectReports } = useAuth();
-  return profile ? resolveOperationalProfile(profile, hasDirectReports) : null;
 }

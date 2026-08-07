@@ -1,22 +1,11 @@
 import { BookOpen, Download, Eye, HelpCircle, ShieldCheck, Workflow } from 'lucide-react';
 import { where } from 'firebase/firestore';
 import { useMemo, useState } from 'react';
-import { useAuth } from '../../auth/AuthProvider';
+import { useAuth } from '../../auth/AuthContext';
 import { Card, EmptyState, PageHeader, StatusBadge } from '../../../shared/components/Ui';
 import { useCollectionData } from '../../../shared/hooks/useCollectionData';
-import { callBackend } from '../../../shared/services/callables';
-
-interface Manual {
-  id: string;
-  title: string;
-  description: string;
-  audience: 'all' | 'operator' | 'admin';
-  version: string;
-  publishedAt: string;
-  pages: number;
-  documentId: string;
-  active: boolean;
-}
+import { openPrivateDocument } from '../../../shared/services/private-files';
+import { decodeManual, type ManualRecord } from '../../../domain/firestore-validation';
 
 const guides = [
   ['Flujo operativo', 'De la solicitud al seguimiento', Workflow],
@@ -30,22 +19,18 @@ const guides = [
 export function HelpCenterPage() {
   const { profile } = useAuth();
   const manualScope = useMemo(
-    () => (profile?.role === 'admin' ? [] : [where('audience', 'in', ['all', 'operator'])]),
+    () => (profile?.role === 'admin' ? [] : [where('accessScope', '==', 'all_active')]),
     [profile?.role],
   );
-  const manuals = useCollectionData<Manual>('manuals', manualScope);
+  const manuals = useCollectionData<ManualRecord>('manuals', decodeManual, manualScope);
   const [feedback, setFeedback] = useState('');
   const visible = manuals.data.filter(
-    (manual) => manual.active && (manual.audience !== 'admin' || profile?.role === 'admin'),
+    (manual) => manual.active && (manual.accessScope !== 'admin_only' || profile?.role === 'admin'),
   );
   async function open(documentId: string) {
     setFeedback('');
     try {
-      const response = await callBackend<{ documentId: string }, { url: string }>(
-        'getPrivateDownloadUrl',
-        { documentId },
-      );
-      window.open(response.url, '_blank', 'noopener,noreferrer');
+      await openPrivateDocument(documentId);
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : 'No fue posible abrir.');
     }
@@ -75,8 +60,8 @@ export function HelpCenterPage() {
                   <BookOpen />
                 </span>
                 <div>
-                  <StatusBadge tone={manual.audience === 'admin' ? 'purple' : 'blue'}>
-                    {manual.audience}
+                  <StatusBadge tone={manual.accessScope === 'admin_only' ? 'purple' : 'blue'}>
+                    {manual.accessScope === 'admin_only' ? 'Administrador' : 'Operación'}
                   </StatusBadge>
                   <h3>{manual.title}</h3>
                   <p>{manual.description}</p>

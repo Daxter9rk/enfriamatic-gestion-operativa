@@ -18,8 +18,9 @@ import {
 import { where } from 'firebase/firestore';
 import { useMemo, useState, type ComponentType } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
-import { useAuth, useOperationalProfile } from '../../app/auth/AuthProvider';
+import { useAuth, useOperationalProfile } from '../../app/auth/AuthContext';
 import type { OperationalProfile } from '../../domain/model';
+import { decodeNotification } from '../../domain/firestore-validation';
 import { useCollectionData } from '../hooks/useCollectionData';
 
 interface NavItem {
@@ -40,6 +41,7 @@ const adminProfiles: OperationalProfile[] = ['primary_admin', 'promoted_admin'];
 const navItems: NavItem[] = [
   { to: '/', label: 'Mi operación', icon: LayoutDashboard, profiles: allProfiles },
   { to: '/solicitudes', label: 'Solicitudes', icon: ClipboardList, profiles: allProfiles },
+  { to: '/equipo', label: 'Mi equipo', icon: Users, profiles: ['supervisor'] },
   { to: '/cotizaciones', label: 'Cotizaciones', icon: FileText, profiles: allProfiles },
   { to: '/clientes', label: 'Clientes', icon: Users, profiles: allProfiles },
   { to: '/instalaciones', label: 'Instalaciones', icon: Building2, profiles: allProfiles },
@@ -97,10 +99,7 @@ export function AppShell() {
     () => [where('userId', '==', profile?.uid ?? '')],
     [profile?.uid],
   );
-  const notifications = useCollectionData<{ id: string; userId: string; readAt: string | null }>(
-    'notifications',
-    notificationScope,
-  );
+  const notifications = useCollectionData('notifications', decodeNotification, notificationScope);
   const [menuOpen, setMenuOpen] = useState(false);
   if (!profile || !operational) return null;
   const unread = notifications.data.filter(

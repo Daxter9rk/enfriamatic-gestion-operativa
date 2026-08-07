@@ -11,10 +11,16 @@ import { where } from 'firebase/firestore';
 import { useMemo, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Client, Equipment, Site, UserProfile } from '../../../domain/model';
+import {
+  decodeClient,
+  decodeEquipment,
+  decodeSite,
+  decodeUserProfile,
+} from '../../../domain/firestore-validation';
 import { callBackend } from '../../../shared/services/callables';
 import { useCollectionData } from '../../../shared/hooks/useCollectionData';
 import { Card, Field, PageHeader } from '../../../shared/components/Ui';
-import { useAuth, useOperationalProfile } from '../../auth/AuthProvider';
+import { useAuth, useOperationalProfile } from '../../auth/AuthContext';
 
 const steps = ['Cliente', 'Instalación', 'Alcance', 'Servicio', 'Asignación', 'Resumen'];
 
@@ -55,10 +61,10 @@ export function RequestWizardPage() {
           : [where('uid', '==', profile?.uid ?? '')],
     [operational, profile?.uid],
   );
-  const clients = useCollectionData<Client>('clients');
-  const sites = useCollectionData<Site>('sites');
-  const equipment = useCollectionData<Equipment>('equipment');
-  const users = useCollectionData<UserProfile>('users', userScope);
+  const clients = useCollectionData<Client>('clients', decodeClient);
+  const sites = useCollectionData<Site>('sites', decodeSite);
+  const equipment = useCollectionData<Equipment>('equipment', decodeEquipment);
+  const users = useCollectionData<UserProfile>('users', decodeUserProfile, userScope);
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState(initialDraft);
   const [error, setError] = useState('');
@@ -72,9 +78,14 @@ export function RequestWizardPage() {
     () => equipment.data.filter((item) => item.siteId === draft.siteId && item.active),
     [draft.siteId, equipment.data],
   );
-  const operators = users.data.filter(
-    (user) => user.role === 'operator' && user.status === 'active',
-  );
+  const operators = [
+    ...new Map(
+      [profile, ...users.data]
+        .filter((user): user is UserProfile => Boolean(user))
+        .filter((user) => user.role === 'operator' && user.status === 'active')
+        .map((user) => [user.uid, user]),
+    ).values(),
+  ];
 
   function update<K extends keyof Draft>(key: K, value: Draft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -267,8 +278,10 @@ export function RequestWizardPage() {
                 type="button"
               >
                 <UserRound />
-                <strong>Sin asignar</strong>
-                <small>Asignar más tarde</small>
+                <strong>{profile?.role === 'admin' ? 'Sin asignar' : 'Para mí'}</strong>
+                <small>
+                  {profile?.role === 'admin' ? 'Asignar más tarde' : profile?.displayName}
+                </small>
               </button>
               {operators.map((operator) => (
                 <button

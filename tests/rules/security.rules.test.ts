@@ -53,8 +53,8 @@ beforeEach(async () => {
       setDoc(doc(db, 'users/invalid'), profile('invalid', { role: 'owner' })),
       setDoc(doc(db, 'clients/client-a'), { name: 'Cliente ficticio', active: true }),
       setDoc(doc(db, 'settings/app'), { taxRate: 0.16 }),
-      setDoc(doc(db, 'manuals/general'), { audience: 'all', title: 'Guía DEV' }),
-      setDoc(doc(db, 'manuals/admin'), { audience: 'admin', title: 'Admin DEV' }),
+      setDoc(doc(db, 'manuals/general'), { accessScope: 'all_active', title: 'Guía DEV' }),
+      setDoc(doc(db, 'manuals/admin'), { accessScope: 'admin_only', title: 'Admin DEV' }),
       setDoc(doc(db, 'requests/own'), {
         folio: 'SOL-DEV-1',
         createdBy: 'subordinate',
@@ -73,6 +73,7 @@ beforeEach(async () => {
       }),
       setDoc(doc(db, 'quotes/draft'), {
         createdBy: 'subordinate',
+        supervisorId: 'supervisor',
         requestId: 'own',
         status: 'draft',
         locked: false,
@@ -126,20 +127,20 @@ describe('identidad y estado', () => {
 });
 
 describe('recursos operativos', () => {
-  it('permite lectura activa y reserva escritura de directorios al admin', async () => {
+  it('permite lectura activa y reserva toda escritura de directorios al backend', async () => {
     const operatorDb = env.authenticatedContext('subordinate').firestore();
     const adminDb = env.authenticatedContext('admin').firestore();
     await assertSucceeds(getDoc(doc(operatorDb, 'clients/client-a')));
     await assertFails(setDoc(doc(operatorDb, 'clients/client-b'), { name: 'No permitido' }));
-    await assertSucceeds(
+    await assertFails(
       setDoc(doc(adminDb, 'clients/client-b'), { name: 'Cliente DEV', active: true }),
     );
   });
 
-  it('permite trabajar la solicitud propia sin cambiar asignación ni folio', async () => {
+  it('reserva al backend el trabajo, la asignación y los folios de solicitudes', async () => {
     const db = env.authenticatedContext('subordinate').firestore();
     await assertSucceeds(getDoc(doc(db, 'requests/own')));
-    await assertSucceeds(
+    await assertFails(
       updateDoc(doc(db, 'requests/own'), {
         status: 'in_progress',
         operationalStage: 'diagnosing',
@@ -149,6 +150,8 @@ describe('recursos operativos', () => {
     );
     await assertFails(updateDoc(doc(db, 'requests/own'), { assigneeId: 'other' }));
     await assertFails(updateDoc(doc(db, 'requests/own'), { folio: 'MANIPULADO' }));
+    const adminDb = env.authenticatedContext('admin').firestore();
+    await assertFails(updateDoc(doc(adminDb, 'requests/own'), { folio: 'MANIPULADO-ADMIN' }));
   });
 
   it('aplica alcance de supervisor y otro equipo', async () => {
@@ -164,7 +167,12 @@ describe('cotizaciones y recursos sensibles', () => {
     await assertSucceeds(
       setDoc(doc(db, 'quotes/draft/items/line-a'), {
         description: 'Servicio ficticio',
+        unit: 'servicio',
         quantity: 1,
+        originalUnitPrice: 100,
+        discountPercent: 0,
+        taxRate: 0.16,
+        createdBy: 'subordinate',
       }),
     );
     await assertFails(updateDoc(doc(db, 'quotes/locked'), { notes: 'Mutación' }));
@@ -178,7 +186,7 @@ describe('cotizaciones y recursos sensibles', () => {
     const adminDb = env.authenticatedContext('admin').firestore();
     await assertSucceeds(getDoc(doc(operatorDb, 'settings/app')));
     await assertFails(updateDoc(doc(operatorDb, 'settings/app'), { taxRate: 0 }));
-    await assertSucceeds(updateDoc(doc(adminDb, 'settings/app'), { taxRate: 0.16 }));
+    await assertFails(updateDoc(doc(adminDb, 'settings/app'), { taxRate: 0.16 }));
     await assertFails(
       setDoc(doc(operatorDb, 'auditLogs/fake'), { actorId: 'subordinate', action: 'fake' }),
     );

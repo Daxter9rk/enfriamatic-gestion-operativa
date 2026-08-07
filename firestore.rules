@@ -10,20 +10,14 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    function validRole() {
-      return profile().role in ['admin', 'operator'];
-    }
-
     function active() {
-      return signedIn() && profile().status == 'active' && validRole();
+      return signedIn()
+        && profile().status == 'active'
+        && profile().role in ['admin', 'operator'];
     }
 
     function admin() {
       return active() && profile().role == 'admin';
-    }
-
-    function operator() {
-      return active() && profile().role == 'operator';
     }
 
     function ownsRequest(data) {
@@ -31,34 +25,43 @@ service cloud.firestore {
     }
 
     function supervisesRequest(data) {
-      return operator() && data.supervisorId == request.auth.uid;
+      return data.supervisorId == request.auth.uid;
     }
 
     function canReadRequest(data) {
       return admin() || ownsRequest(data) || supervisesRequest(data);
     }
 
-    function draftQuote() {
-      return resource.data.status == 'draft' && resource.data.locked == false;
+    function canReadQuote(data) {
+      return admin()
+        || data.createdBy == request.auth.uid
+        || data.supervisorId == request.auth.uid;
     }
 
-    function safeRequestWorkUpdate() {
-      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-        'status',
-        'operationalStage',
-        'updatedAt',
-        'updatedBy'
-      ])
-      && request.resource.data.assigneeId == resource.data.assigneeId
-      && request.resource.data.createdBy == resource.data.createdBy
-      && request.resource.data.status in ['in_progress', 'completed']
-      && request.resource.data.operationalStage in [
-        'diagnosing',
-        'waiting_information',
-        'executing',
-        'quoting',
-        'follow_up'
-      ];
+    function editableQuote(quoteId) {
+      let quote = get(/databases/$(database)/documents/quotes/$(quoteId)).data;
+      return quote.status == 'draft'
+        && quote.locked == false
+        && (admin() || quote.createdBy == request.auth.uid);
+    }
+
+    function validQuoteItem(data) {
+      return data.description is string
+        && data.description.size() > 0
+        && data.description.size() <= 500
+        && data.unit is string
+        && data.unit.size() > 0
+        && data.quantity is number
+        && data.quantity > 0
+        && data.originalUnitPrice is number
+        && data.originalUnitPrice >= 0
+        && data.discountPercent is number
+        && data.discountPercent >= 0
+        && data.discountPercent <= 100
+        && data.taxRate is number
+        && data.taxRate >= 0
+        && data.taxRate <= 1
+        && data.createdBy == request.auth.uid;
     }
 
     match /users/{userId} {
@@ -67,91 +70,69 @@ service cloud.firestore {
         || userId == request.auth.uid
         || resource.data.supervisorId == request.auth.uid
       );
-      allow create, update, delete: if false;
+      allow write: if false;
     }
 
     match /teams/{teamId} {
-      allow read: if active() && (
-        admin()
-        || profile().teamId == teamId
-      );
+      allow read: if active() && (admin() || profile().teamId == teamId);
       allow write: if false;
     }
 
     match /clients/{clientId} {
       allow read: if active();
-      allow create, update: if admin();
-      allow delete: if false;
+      allow write: if false;
     }
 
     match /sites/{siteId} {
       allow read: if active();
-      allow create, update: if admin();
-      allow delete: if false;
+      allow write: if false;
     }
 
     match /equipment/{equipmentId} {
       allow read: if active();
-      allow create, update: if admin();
-      allow delete: if false;
+      allow write: if false;
     }
 
     match /requests/{requestId} {
       allow read: if active() && canReadRequest(resource.data);
-      allow create, delete: if false;
-      allow update: if active() && (
-        admin()
-        || (
-          resource.data.assigneeId == request.auth.uid
-          && safeRequestWorkUpdate()
-        )
-      );
+      allow write: if false;
     }
 
     match /catalogItems/{itemId} {
       allow read: if active();
-      allow create, update: if admin();
-      allow delete: if false;
+      allow write: if false;
     }
 
     match /quotes/{quoteId} {
-      allow read: if active() && (
-        admin()
-        || resource.data.createdBy == request.auth.uid
-        || canReadRequest(
-          get(/databases/$(database)/documents/requests/$(resource.data.requestId)).data
-        )
-      );
-      allow create: if active()
-        && request.resource.data.status == 'draft'
-        && request.resource.data.locked == false
-        && request.resource.data.createdBy == request.auth.uid
-        && request.resource.data.folio == null;
+      allow read: if active() && canReadQuote(resource.data);
+      allow create, delete: if false;
       allow update: if active()
-        && draftQuote()
+        && resource.data.status == 'draft'
+        && resource.data.locked == false
         && request.resource.data.status == 'draft'
         && request.resource.data.locked == false
-        && request.resource.data.folio == null
-        && (
-          admin()
-          || resource.data.createdBy == request.auth.uid
-        );
-      allow delete: if false;
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'discountDisplayMode',
+          'validityDays',
+          'notes',
+          'conditions',
+          'totals',
+          'updatedAt',
+          'updatedBy'
+        ])
+        && request.resource.data.updatedBy == request.auth.uid
+        && (admin() || resource.data.createdBy == request.auth.uid);
 
       match /items/{itemId} {
-        allow read: if active() && (
-          admin()
-          || get(/databases/$(database)/documents/quotes/$(quoteId)).data.createdBy
-             == request.auth.uid
+        allow read: if active() && canReadQuote(
+          get(/databases/$(database)/documents/quotes/$(quoteId)).data
         );
-        allow create, update, delete: if active()
-          && get(/databases/$(database)/documents/quotes/$(quoteId)).data.status == 'draft'
-          && get(/databases/$(database)/documents/quotes/$(quoteId)).data.locked == false
-          && (
-            admin()
-            || get(/databases/$(database)/documents/quotes/$(quoteId)).data.createdBy
-               == request.auth.uid
-          );
+        allow create: if active() && editableQuote(quoteId) && validQuoteItem(request.resource.data);
+        allow update: if active()
+          && editableQuote(quoteId)
+          && validQuoteItem(request.resource.data)
+          && request.resource.data.createdBy == resource.data.createdBy;
+        allow delete: if active() && editableQuote(quoteId);
       }
     }
 
@@ -174,14 +155,13 @@ service cloud.firestore {
 
     match /settings/{settingId} {
       allow read: if active();
-      allow create, update: if admin();
-      allow delete: if false;
+      allow write: if false;
     }
 
     match /manuals/{manualId} {
       allow read: if active() && (
-        resource.data.audience in ['all', 'operator']
-        || admin()
+        resource.data.accessScope == 'all_active'
+        || (resource.data.accessScope == 'admin_only' && admin())
       );
       allow write: if false;
     }
@@ -191,6 +171,14 @@ service cloud.firestore {
     }
 
     match /counters/{counterId} {
+      allow read, write: if false;
+    }
+
+    match /idempotencyKeys/{operationId} {
+      allow read, write: if false;
+    }
+
+    match /consistencyJobs/{jobId} {
       allow read, write: if false;
     }
 

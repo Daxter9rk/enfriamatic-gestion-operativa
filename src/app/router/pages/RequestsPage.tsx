@@ -2,8 +2,7 @@ import { ClipboardList, Plus, Search } from 'lucide-react';
 import { where } from 'firebase/firestore';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { ServiceRequest } from '../../../domain/model';
-import { useAuth, useOperationalProfile } from '../../auth/AuthProvider';
+import { useOperationalProfile } from '../../auth/AuthContext';
 import {
   Card,
   EmptyState,
@@ -12,39 +11,54 @@ import {
   PageHeader,
   StatusBadge,
 } from '../../../shared/components/Ui';
+import { useAuthorizedRequests } from '../../../shared/hooks/useAuthorizedRequests';
 import { useCollectionData } from '../../../shared/hooks/useCollectionData';
+import { decodeUserProfile } from '../../../domain/firestore-validation';
+import type { UserProfile } from '../../../domain/model';
+import { callBackend } from '../../../shared/services/callables';
+import { useAuth } from '../../auth/AuthContext';
 
 export function RequestsPage() {
   const { profile } = useAuth();
   const operational = useOperationalProfile();
-  const requestScope = useMemo(
+  const requests = useAuthorizedRequests();
+  const userScope = useMemo(
     () =>
       operational === 'primary_admin' || operational === 'promoted_admin'
         ? []
-        : operational === 'supervisor'
-          ? [where('supervisorId', '==', profile?.uid ?? '')]
-          : [where('assigneeId', '==', profile?.uid ?? '')],
+        : [where('supervisorId', '==', profile?.uid ?? '')],
     [operational, profile?.uid],
   );
-  const requests = useCollectionData<ServiceRequest>('requests', requestScope);
+  const users = useCollectionData<UserProfile>('users', decodeUserProfile, userScope);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('open');
+  const [feedback, setFeedback] = useState('');
+  const assignees = [
+    ...new Map(
+      [profile, ...users.data]
+        .filter((user): user is UserProfile => Boolean(user))
+        .filter((user) => user.role === 'operator' && user.status === 'active')
+        .map((user) => [user.uid, user]),
+    ).values(),
+  ];
+
+  async function assign(requestId: string, recipientId: string) {
+    if (!recipientId) return;
+    setFeedback('');
+    try {
+      await callBackend('assignServiceRequest', {
+        requestId,
+        recipientId,
+        idempotencyKey: crypto.randomUUID(),
+      });
+      setFeedback('Solicitud asignada y auditada.');
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : 'No fue posible asignar.');
+    }
+  }
 
   const visible = useMemo(() => {
-    const scoped =
-      operational === 'operator'
-        ? requests.data.filter(
-            (item) => item.assigneeId === profile?.uid || item.createdBy === profile?.uid,
-          )
-        : operational === 'supervisor'
-          ? requests.data.filter(
-              (item) =>
-                item.assigneeId === profile?.uid ||
-                item.supervisorId === profile?.uid ||
-                item.createdBy === profile?.uid,
-            )
-          : requests.data;
-    return scoped.filter((item) => {
+    return requests.data.filter((item) => {
       const matchesText = `${item.folio} ${item.description} ${item.serviceType}`
         .toLowerCase()
         .includes(search.toLowerCase());
@@ -56,7 +70,7 @@ export function RequestsPage() {
             : item.status === status;
       return matchesText && matchesStatus;
     });
-  }, [operational, profile?.uid, requests.data, search, status]);
+  }, [requests.data, search, status]);
 
   if (requests.loading) return <LoadingState />;
   if (requests.error) return <ErrorState message={requests.error} />;
@@ -96,6 +110,7 @@ export function RequestsPage() {
             <option value="completed">Completadas</option>
           </select>
         </div>
+        {feedback ? <div className="notice">{feedback}</div> : null}
         {visible.length === 0 ? (
           <EmptyState
             icon={ClipboardList}
@@ -112,6 +127,7 @@ export function RequestsPage() {
                   <th>Prioridad</th>
                   <th>Estado</th>
                   <th>Fecha solicitada</th>
+                  <th>Responsable</th>
                   <th />
                 </tr>
               </thead>
@@ -150,6 +166,26 @@ export function RequestsPage() {
                       </StatusBadge>
                     </td>
                     <td>{item.requestedDate}</td>
+                    <td>
+                      {operational === 'primary_admin' ||
+                      operational === 'promoted_admin' ||
+                      operational === 'supervisor' ? (
+                        <select
+                          aria-label={`Asignar ${item.folio}`}
+                          value={item.assigneeId ?? ''}
+                          onChange={(event) => void assign(item.id, event.target.value)}
+                        >
+                          <option value="">Sin asignar</option>
+                          {assignees.map((user) => (
+                            <option key={user.uid} value={user.uid}>
+                              {user.displayName}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        (assignees.find((user) => user.uid === item.assigneeId)?.displayName ?? '—')
+                      )}
+                    </td>
                     <td>
                       <Link
                         className="icon-button"

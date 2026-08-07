@@ -20,14 +20,14 @@ export type OperationalStage =
 
 export type QuoteRequirement = 'yes' | 'no' | 'undetermined';
 export type QuoteStatus =
-  'draft' | 'issued' | 'sent' | 'accepted' | 'rejected' | 'cancelled' | 'expired';
+  'draft' | 'issuing' | 'issued' | 'sent' | 'accepted' | 'rejected' | 'cancelled' | 'expired';
 export type DiscountDisplayMode = 'detailed' | 'summary' | 'incorporated';
 export type DocumentStatus = 'not_generated' | 'generating' | 'ready' | 'failed';
 
 export interface EntityMeta {
-  createdAt: string;
+  createdAt: Timestamp;
   createdBy: string;
-  updatedAt: string;
+  updatedAt: Timestamp;
   updatedBy: string;
   schemaVersion: number;
   active: boolean;
@@ -132,11 +132,13 @@ export interface Quote extends EntityMeta {
   id: string;
   folio: string | null;
   revision: number;
+  revisionNumber: number;
   originalQuoteId: string | null;
   requestId: string;
   clientId: string;
   siteId: string;
   equipmentId: string | null;
+  supervisorId: string | null;
   status: QuoteStatus;
   locked: boolean;
   discountDisplayMode: DiscountDisplayMode;
@@ -144,6 +146,8 @@ export interface Quote extends EntityMeta {
   notes: string;
   conditions: string[];
   totals: QuoteTotals;
+  documentId: string | null;
+  documentStatus: DocumentStatus;
 }
 
 export interface Notification {
@@ -161,8 +165,8 @@ export interface Notification {
   body: string;
   resourceType: string;
   resourceId: string;
-  readAt: string | null;
-  createdAt: string;
+  readAt: Timestamp | null;
+  createdAt: Timestamp;
 }
 
 export interface AuditLog {
@@ -175,7 +179,7 @@ export interface AuditLog {
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
   metadata: Record<string, unknown>;
-  createdAt: string;
+  createdAt: Timestamp;
 }
 
 export interface AppSettings {
@@ -205,3 +209,4 @@ export const collectionNames = [
   'settings',
   'manuals',
 ] as const;
+import type { Timestamp } from 'firebase/firestore';

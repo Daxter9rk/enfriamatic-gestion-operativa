@@ -1,7 +1,7 @@
 import { ShieldX } from 'lucide-react';
 import type { PropsWithChildren } from 'react';
 import { Link } from 'react-router-dom';
-import { useAuth } from './AuthProvider';
+import { useAuth } from './AuthContext';
 
 export function AdminOnly({ children }: PropsWithChildren) {
   const { profile } = useAuth();

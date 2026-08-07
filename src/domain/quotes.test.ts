@@ -56,7 +56,9 @@ describe('inmutabilidad', () => {
   });
 
   it('sólo permite transiciones explícitas', () => {
-    expect(canTransitionQuote('draft', 'issued')).toBe(true);
+    expect(canTransitionQuote('draft', 'issuing')).toBe(true);
+    expect(canTransitionQuote('issuing', 'issued')).toBe(true);
+    expect(canTransitionQuote('draft', 'issued')).toBe(false);
     expect(canTransitionQuote('issued', 'draft')).toBe(false);
     expect(canTransitionQuote('accepted', 'cancelled')).toBe(false);
   });

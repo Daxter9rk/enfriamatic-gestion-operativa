@@ -1,32 +1,29 @@
 import { createRequire } from 'node:module';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { initializeApp } from '../functions/node_modules/firebase-admin/app/index.js';
-import { getAuth } from '../functions/node_modules/firebase-admin/auth/index.js';
-import {
-  FieldValue,
-  getFirestore,
-  Timestamp,
-} from '../functions/node_modules/firebase-admin/firestore/index.js';
-import { getStorage } from '../functions/node_modules/firebase-admin/storage/index.js';
-import { PDFDocument, StandardFonts, rgb } from '../functions/node_modules/pdf-lib/es/index.js';
 
 const PROJECT_ID = 'enfriamatic-operativa-dev';
 const BUCKET = `${PROJECT_ID}.firebasestorage.app`;
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, '..');
 const credentialsPath = resolve(repositoryRoot, '.credentials', `${PROJECT_ID}-users.local.json`);
+const rootRequire = createRequire(import.meta.url);
+const functionsRequire = createRequire(resolve(repositoryRoot, 'functions', 'package.json'));
+const { initializeApp } = functionsRequire('firebase-admin/app');
+const { getAuth } = functionsRequire('firebase-admin/auth');
+const { FieldValue, getFirestore, Timestamp } = functionsRequire('firebase-admin/firestore');
+const { getStorage } = functionsRequire('firebase-admin/storage');
+const { PDFDocument, StandardFonts, rgb } = functionsRequire('pdf-lib');
 
 if (process.env.GCLOUD_PROJECT && process.env.GCLOUD_PROJECT !== PROJECT_ID) {
   throw new Error(`Proyecto efectivo no autorizado: ${process.env.GCLOUD_PROJECT}`);
 }
 
-const require = createRequire(import.meta.url);
-const cliAuth = require('firebase-tools/lib/auth');
-const { requireAuth } = require('firebase-tools/lib/requireAuth');
-const cliApi = require('firebase-tools/lib/apiv2');
+const cliAuth = rootRequire('firebase-tools/lib/auth');
+const { requireAuth } = rootRequire('firebase-tools/lib/requireAuth');
+const cliApi = rootRequire('firebase-tools/lib/apiv2');
 
 const account = cliAuth.getGlobalDefaultAccount();
 if (!account?.user?.email || !account.tokens) {
@@ -67,7 +64,10 @@ async function enablePasswordAuthentication() {
   }
 }
 
-initializeApp({ credential, projectId: PROJECT_ID, storageBucket: BUCKET });
+const app = initializeApp({ credential, projectId: PROJECT_ID, storageBucket: BUCKET });
+if (app.options.projectId !== PROJECT_ID) {
+  throw new Error(`SDK Admin inicializado contra proyecto no autorizado: ${app.options.projectId}`);
+}
 const auth = getAuth();
 const db = getFirestore();
 const bucket = getStorage().bucket(BUCKET);
@@ -135,7 +135,14 @@ function randomPassword() {
 
 async function readCredentials() {
   try {
-    return JSON.parse(await readFile(credentialsPath, 'utf8'));
+    const parsed = JSON.parse(await readFile(credentialsPath, 'utf8'));
+    if (!parsed || typeof parsed !== 'object' || parsed.projectId !== PROJECT_ID) {
+      throw new Error('El archivo local de credenciales pertenece a otro proyecto o es inválido.');
+    }
+    if (!parsed.users || typeof parsed.users !== 'object' || Array.isArray(parsed.users)) {
+      throw new Error('El archivo local de credenciales no contiene un mapa de usuarios válido.');
+    }
+    return parsed.users;
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return {};
     throw error;
@@ -189,7 +196,7 @@ function common(actorId) {
   };
 }
 
-async function createFixturePdf(title, audience) {
+async function createFixturePdf(title, accessScope) {
   const pdf = await PDFDocument.create();
   const page = pdf.addPage([612, 792]);
   const font = await pdf.embedFont(StandardFonts.Helvetica);
@@ -209,7 +216,7 @@ async function createFixturePdf(title, audience) {
     font: bold,
     color: rgb(0.75, 0.12, 0.12),
   });
-  page.drawText(`Audiencia técnica: ${audience}`, { x: 54, y: 560, size: 11, font });
+  page.drawText(`Alcance técnico: ${accessScope}`, { x: 54, y: 560, size: 11, font });
   page.drawText('Contenido ficticio para validar autorización, preview y descarga privada.', {
     x: 54,
     y: 535,
@@ -221,23 +228,24 @@ async function createFixturePdf(title, audience) {
 
 async function uploadFixtures(actorId) {
   const manuals = [
-    ['manual-general-dev', 'Guía general DEV', 'all'],
-    ['manual-operador-dev', 'Manual del operador DEV', 'operator'],
-    ['manual-admin-dev', 'Manual del administrador DEV', 'admin'],
+    ['manual-general-dev', 'Guía general DEV', 'all_active'],
+    ['manual-operador-dev', 'Manual del operador DEV', 'all_active'],
+    ['manual-admin-dev', 'Manual del administrador DEV', 'admin_only'],
   ];
   const results = [];
-  for (const [documentId, title, audience] of manuals) {
+  for (const [documentId, title, accessScope] of manuals) {
     const storagePath = `manuals/${documentId}.pdf`;
-    const bytes = await createFixturePdf(title, audience);
+    const bytes = await createFixturePdf(title, accessScope);
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
     await bucket.file(storagePath).save(bytes, {
       resumable: false,
       contentType: 'application/pdf',
       metadata: {
         cacheControl: 'private, max-age=0, no-store',
-        metadata: { documentId, audience, fixture: 'true' },
+        metadata: { documentId, accessScope, fixture: 'true', sha256 },
       },
     });
-    results.push({ documentId, title, audience, storagePath, size: bytes.length });
+    results.push({ documentId, title, accessScope, storagePath, size: bytes.length, sha256 });
   }
 
   const png = Buffer.from(
@@ -253,12 +261,14 @@ async function uploadFixtures(actorId) {
   await db.doc('documents/catalog-image-dev').set({
     id: 'catalog-image-dev',
     kind: 'catalog_image',
+    accessScope: 'all_active',
+    resourceId: 'catalog-compresor-dev',
     storagePath: catalogPath,
+    fileName: 'catalogo-fixture-dev.png',
     mimeType: 'image/png',
     size: png.length,
-    ownerType: 'catalogItem',
-    ownerId: 'catalog-compresor-dev',
-    visibility: 'authorized',
+    sha256: createHash('sha256').update(png).digest('hex'),
+    status: 'ready',
     ...common(actorId),
   });
   return results;
@@ -348,7 +358,7 @@ async function seedFirestore(ids, manualFiles) {
       capacity: '10 HP',
       refrigerant: 'R-404A',
       status: 'operating',
-      specifications: { voltage: '220 V', phases: 3 },
+      specifications: { voltage: '220 V', phases: '3' },
     },
     'equipment/equipment-evaporador-dev': {
       id: 'equipment-evaporador-dev',
@@ -398,11 +408,13 @@ async function seedFirestore(ids, manualFiles) {
       requestFolioPrefix: 'SOL-DEV',
       quoteFolioPrefix: 'COT-DEV',
       legalText: '',
-      conditions: ['Condiciones ficticias de prueba DEV; no constituyen política comercial.'],
-      provisionalNotice: 'DEV provisional — requiere validación comercial antes de PROD',
+      commercialConditions: [
+        'Condiciones ficticias de prueba DEV; no constituyen política comercial.',
+      ],
+      policyStatus: 'dev_provisional',
     },
-    'counters/requests': { value: 3 },
-    'counters/quotes': { value: 2 },
+    'counters/requests-2026': { value: 3 },
+    'counters/quotes-2026': { value: 2 },
   };
 
   for (const [path, data] of Object.entries(records)) {
@@ -424,7 +436,7 @@ async function seedFirestore(ids, manualFiles) {
   };
   batch.set(db.doc('requests/request-assigned-dev'), {
     id: 'request-assigned-dev',
-    folio: 'SOL-DEV-000001',
+    folio: 'SOL-DEV-2026-00001',
     ...requestBase,
     priority: 'high',
     assigneeId: ids.subordinateOne,
@@ -437,7 +449,7 @@ async function seedFirestore(ids, manualFiles) {
   });
   batch.set(db.doc('requests/request-unassigned-dev'), {
     id: 'request-unassigned-dev',
-    folio: 'SOL-DEV-000002',
+    folio: 'SOL-DEV-2026-00002',
     ...requestBase,
     equipmentId: null,
     scope: 'general',
@@ -453,7 +465,7 @@ async function seedFirestore(ids, manualFiles) {
   });
   batch.set(db.doc('requests/request-independent-dev'), {
     id: 'request-independent-dev',
-    folio: 'SOL-DEV-000003',
+    folio: 'SOL-DEV-2026-00003',
     ...requestBase,
     clientId: 'client-centro-dev',
     siteId: 'site-taller-dev',
@@ -474,11 +486,13 @@ async function seedFirestore(ids, manualFiles) {
     id: 'quote-draft-dev',
     folio: null,
     revision: 0,
+    revisionNumber: 0,
     originalQuoteId: null,
     requestId: 'request-assigned-dev',
     clientId: 'client-laboratorio-dev',
     siteId: 'site-camara-dev',
     equipmentId: 'equipment-compresor-dev',
+    supervisorId: ids.supervisor,
     clientName: 'Laboratorio Boreal DEV',
     status: 'draft',
     locked: false,
@@ -488,6 +502,7 @@ async function seedFirestore(ids, manualFiles) {
     conditions: [],
     totals: { gross: 1800, discount: 180, subtotal: 1620, tax: 259.2, total: 1879.2 },
     documentStatus: 'not_generated',
+    documentId: null,
     ...common(ids.subordinateOne),
   });
   batch.set(db.doc('quotes/quote-draft-dev/items/item-1'), {
@@ -514,10 +529,14 @@ async function seedFirestore(ids, manualFiles) {
     batch.set(db.doc(`documents/${manual.documentId}`), {
       id: manual.documentId,
       kind: 'manual',
+      accessScope: manual.accessScope,
+      resourceId: manual.documentId,
       storagePath: manual.storagePath,
+      fileName: `${manual.documentId}.pdf`,
       mimeType: 'application/pdf',
       size: manual.size,
-      audience: manual.audience,
+      sha256: manual.sha256,
+      status: 'ready',
       fixture: true,
       ...common(actorId),
     });
@@ -525,7 +544,7 @@ async function seedFirestore(ids, manualFiles) {
       id: manual.documentId,
       title: manual.title,
       description: 'Fixture privado para validación DEV.',
-      audience: manual.audience,
+      accessScope: manual.accessScope,
       version: 'DEV-1',
       publishedAt: '2026-08-07',
       pages: 1,
@@ -562,9 +581,12 @@ async function seedFirestore(ids, manualFiles) {
   await batch.commit();
 }
 
+console.log(`[preflight] Proyecto autorizado para Auth: ${PROJECT_ID}`);
 await enablePasswordAuthentication();
 const identities = await upsertUsers();
+console.log(`[preflight] Proyecto autorizado para Storage: ${PROJECT_ID}`);
 const manualFiles = await uploadFixtures(identities.primaryAdmin);
+console.log(`[preflight] Proyecto autorizado para Firestore: ${PROJECT_ID}`);
 await seedFirestore(identities, manualFiles);
 
 console.log(`Seed idempotente completado en ${PROJECT_ID}.`);

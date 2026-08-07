@@ -1,5 +1,5 @@
 import { AlertTriangle, LogOut, ShieldX } from 'lucide-react';
-import { useAuth } from './AuthProvider';
+import { useAuth } from './AuthContext';
 
 const messages = {
   profile_missing: [

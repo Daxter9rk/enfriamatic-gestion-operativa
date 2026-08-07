@@ -16,7 +16,7 @@ const mocks: {
   callBackend: vi.fn<(name: string, payload: unknown) => Promise<unknown>>(),
 }));
 
-vi.mock('../auth/AuthProvider', () => ({
+vi.mock('../auth/AuthContext', () => ({
   useAuth: () => ({
     user: { uid: 'user-1' },
     profile: {
@@ -41,6 +41,14 @@ vi.mock('../auth/AuthProvider', () => ({
 vi.mock('../../shared/hooks/useCollectionData', () => ({
   useCollectionData: (path: string) => ({
     data: mocks.collections.get(path) ?? [],
+    loading: false,
+    error: null,
+  }),
+}));
+
+vi.mock('../../shared/hooks/useAuthorizedQuotes', () => ({
+  useAuthorizedQuotes: () => ({
+    data: mocks.collections.get('quotes') ?? [],
     loading: false,
     error: null,
   }),
@@ -100,7 +108,17 @@ describe('critical component flows', () => {
   it('recalculates and issues a draft quote', async () => {
     const user = userEvent.setup();
     mocks.collections.set('quotes', [
-      { id: 'quote-1', folio: null, status: 'draft', locked: false },
+      {
+        id: 'quote-1',
+        folio: null,
+        status: 'draft',
+        locked: false,
+        discountDisplayMode: 'detailed',
+        notes: '',
+        conditions: [],
+        validityDays: 15,
+        documentId: null,
+      },
     ]);
     mocks.collections.set('quotes/quote-1/items', [
       {
@@ -139,7 +157,7 @@ describe('critical component flows', () => {
       {
         id: 'all',
         title: 'Manual general',
-        audience: 'all',
+        accessScope: 'all_active',
         active: true,
         description: '',
         version: '1',
@@ -150,7 +168,7 @@ describe('critical component flows', () => {
       {
         id: 'admin',
         title: 'Manual administrador',
-        audience: 'admin',
+        accessScope: 'admin_only',
         active: true,
         description: '',
         version: '1',

@@ -14,10 +14,12 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:rules": "vitest run --config vitest.rules.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "build": "tsc -b && vite build",
     "validate": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build",
     "emulators": "firebase emulators:start --project dev",
-    "test:emulators": "firebase emulators:exec --project dev --only firestore,storage \"npm run test:rules\"",
+    "test:emulators": "npm run build:functions && firebase emulators:exec --project enfriamatic-operativa-dev --only auth,firestore,functions,storage \"node scripts/seed-emulators.mjs && npm run test:rules && npm run test:integration\"",
+    "build:functions": "npm --prefix functions run build",
     "seed:dev": "node scripts/seed-dev.mjs"
   },
   "dependencies": {

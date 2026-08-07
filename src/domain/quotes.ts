@@ -1,47 +1,20 @@
 import type { QuoteLine, QuoteLineInput, QuoteStatus, QuoteTotals } from './model';
-
-const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+import {
+  calculateQuoteLine as calculateLine,
+  calculateQuoteTotals as calculateTotals,
+} from './quote-calculations';
 
 export function calculateQuoteLine(input: QuoteLineInput): QuoteLine {
-  if (input.quantity <= 0 || input.originalUnitPrice < 0) {
-    throw new Error('Cantidad y precio deben ser válidos.');
-  }
-  if (input.discountPercent < 0 || input.discountPercent > 100) {
-    throw new Error('El descuento debe estar entre 0 y 100.');
-  }
-  if (input.taxRate < 0 || input.taxRate > 1) {
-    throw new Error('La tasa de impuesto debe estar entre 0 y 1.');
-  }
-  const grossAmount = money(input.quantity * input.originalUnitPrice);
-  const discountAmount = money(grossAmount * (input.discountPercent / 100));
-  const netAmount = money(grossAmount - discountAmount);
-  const taxAmount = money(netAmount * input.taxRate);
-  return {
-    ...input,
-    finalUnitPrice: money(input.originalUnitPrice * (1 - input.discountPercent / 100)),
-    grossAmount,
-    discountAmount,
-    netAmount,
-    taxAmount,
-    totalAmount: money(netAmount + taxAmount),
-  };
+  return calculateLine(input);
 }
 
 export function calculateQuoteTotals(lines: QuoteLine[]): QuoteTotals {
-  return lines.reduce<QuoteTotals>(
-    (totals, line) => ({
-      gross: money(totals.gross + line.grossAmount),
-      discount: money(totals.discount + line.discountAmount),
-      subtotal: money(totals.subtotal + line.netAmount),
-      tax: money(totals.tax + line.taxAmount),
-      total: money(totals.total + line.totalAmount),
-    }),
-    { gross: 0, discount: 0, subtotal: 0, tax: 0, total: 0 },
-  );
+  return calculateTotals(lines);
 }
 
 const transitions: Record<QuoteStatus, readonly QuoteStatus[]> = {
-  draft: ['issued', 'cancelled'],
+  draft: ['issuing', 'cancelled'],
+  issuing: ['draft', 'issued'],
   issued: ['sent', 'cancelled'],
   sent: ['accepted', 'rejected', 'expired', 'cancelled'],
   accepted: [],

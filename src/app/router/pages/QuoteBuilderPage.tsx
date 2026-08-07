@@ -1,14 +1,17 @@
-import { FileCheck2, Plus, Trash2 } from 'lucide-react';
-import { addDoc, collection, doc, serverTimestamp, setDoc, where } from 'firebase/firestore';
-import { useMemo, useState, type FormEvent } from 'react';
+import { Download, Eye, FileCheck2, Plus, Save, Trash2 } from 'lucide-react';
+import { addDoc, collection, doc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import type { CatalogItem, Quote, QuoteLine, QuoteLineInput } from '../../../domain/model';
+import type { CatalogItem, QuoteLine, QuoteLineInput } from '../../../domain/model';
+import { decodeCatalogItem, decodeQuoteLine } from '../../../domain/firestore-validation';
 import { calculateQuoteLine, calculateQuoteTotals } from '../../../domain/quotes';
-import { useAuth, useOperationalProfile } from '../../auth/AuthProvider';
+import { useAuth } from '../../auth/AuthContext';
 import { Card, Field, LoadingState, PageHeader, StatusBadge } from '../../../shared/components/Ui';
 import { useCollectionData } from '../../../shared/hooks/useCollectionData';
+import { useAuthorizedQuotes } from '../../../shared/hooks/useAuthorizedQuotes';
 import { callBackend } from '../../../shared/services/callables';
 import { getFirebaseServices } from '../../../shared/services/firebase';
+import { openPrivateDocument } from '../../../shared/services/private-files';
 
 const blankLine = {
   code: '',
@@ -25,23 +28,20 @@ export function QuoteBuilderPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const { profile } = useAuth();
-  const operational = useOperationalProfile();
-  const quoteScope = useMemo(
-    () =>
-      operational === 'primary_admin' || operational === 'promoted_admin'
-        ? []
-        : [where('createdBy', '==', profile?.uid ?? '')],
-    [operational, profile?.uid],
-  );
-  const quotes = useCollectionData<Quote>('quotes', quoteScope);
-  const catalog = useCollectionData<CatalogItem>('catalogItems');
+  const quotes = useAuthorizedQuotes();
+  const catalog = useCollectionData<CatalogItem>('catalogItems', decodeCatalogItem);
   const items = useCollectionData<QuoteLineInput>(
     quoteId === 'nueva' ? 'quotes/__none__/items' : `quotes/${quoteId}/items`,
+    decodeQuoteLine,
   );
   const [line, setLine] = useState(blankLine);
   const [feedback, setFeedback] = useState('');
   const [working, setWorking] = useState(false);
+  const [preview, setPreview] = useState(false);
+  const [details, setDetails] = useState({ notes: '', conditions: '', validityDays: 15 });
+  const issueKey = useRef(crypto.randomUUID());
   const quote = quotes.data.find((item) => item.id === quoteId);
+  const editable = quote?.status === 'draft' && !quote.locked;
   const calculated = useMemo(
     () =>
       items.data.flatMap((item) => {
@@ -55,38 +55,31 @@ export function QuoteBuilderPage() {
   );
   const summary = calculateQuoteTotals(calculated);
 
+  useEffect(() => {
+    if (quote) {
+      setDetails({
+        notes: quote.notes,
+        conditions: quote.conditions.join('\n'),
+        validityDays: quote.validityDays,
+      });
+    }
+  }, [quote]);
+
   async function createDraft() {
     if (!profile) return;
+    const requestId = params.get('requestId');
+    if (!requestId) {
+      setFeedback('Selecciona una solicitud antes de crear la cotización.');
+      return;
+    }
     setWorking(true);
     setFeedback('');
     try {
-      const reference = doc(collection(getFirebaseServices().firestore, 'quotes'));
-      await setDoc(reference, {
-        id: reference.id,
-        folio: null,
-        revision: 0,
-        originalQuoteId: null,
-        requestId: params.get('requestId') ?? '',
-        clientId: '',
-        siteId: '',
-        equipmentId: null,
-        clientName: 'Cliente DEV por seleccionar',
-        status: 'draft',
-        locked: false,
-        discountDisplayMode: 'detailed',
-        validityDays: 15,
-        notes: '',
-        conditions: [],
-        totals: { gross: 0, discount: 0, subtotal: 0, tax: 0, total: 0 },
-        documentStatus: 'not_generated',
-        createdAt: serverTimestamp(),
-        createdBy: profile.uid,
-        updatedAt: serverTimestamp(),
-        updatedBy: profile.uid,
-        schemaVersion: 1,
-        active: true,
-      });
-      await navigate(`/cotizaciones/${reference.id}`, { replace: true });
+      const response = await callBackend<
+        { requestId: string; idempotencyKey: string },
+        { quoteId: string }
+      >('createQuoteDraft', { requestId, idempotencyKey: crypto.randomUUID() });
+      await navigate(`/cotizaciones/${response.quoteId}`, { replace: true });
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : 'No fue posible crear.');
     } finally {
@@ -95,11 +88,18 @@ export function QuoteBuilderPage() {
   }
 
   async function addLine(input: Omit<QuoteLineInput, 'id'>) {
-    if (quote?.locked) return;
+    if (!editable || !profile) return;
     setWorking(true);
     setFeedback('');
     try {
-      await addDoc(collection(getFirebaseServices().firestore, 'quotes', quoteId, 'items'), input);
+      await addDoc(collection(getFirebaseServices().firestore, 'quotes', quoteId, 'items'), {
+        ...input,
+        discountDisplayMode: quote?.discountDisplayMode ?? 'detailed',
+        createdAt: serverTimestamp(),
+        createdBy: profile.uid,
+        updatedAt: serverTimestamp(),
+        updatedBy: profile.uid,
+      });
       setLine(blankLine);
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : 'No fue posible agregar.');
@@ -123,6 +123,7 @@ export function QuoteBuilderPage() {
   }
 
   async function remove(item: QuoteLine) {
+    if (!editable) return;
     const { deleteDoc } = await import('firebase/firestore');
     await deleteDoc(doc(getFirebaseServices().firestore, 'quotes', quoteId, 'items', item.id));
   }
@@ -134,10 +135,52 @@ export function QuoteBuilderPage() {
       const response = await callBackend<
         { quoteId: string; idempotencyKey: string },
         { folio: string; status: string }
-      >('issueQuote', { quoteId, idempotencyKey: crypto.randomUUID() });
-      setFeedback(`Cotización ${response.folio} emitida y PDF generado.`);
+      >('issueQuote', { quoteId, idempotencyKey: issueKey.current });
+      setFeedback(
+        response.status === 'generating'
+          ? `La emisión ${response.folio} ya está en proceso.`
+          : `Cotización ${response.folio} emitida y PDF generado.`,
+      );
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : 'No fue posible emitir.');
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function saveDetails() {
+    if (!editable || !profile) return;
+    setWorking(true);
+    try {
+      await updateDoc(doc(getFirebaseServices().firestore, 'quotes', quoteId), {
+        notes: details.notes.trim(),
+        conditions: details.conditions
+          .split('\n')
+          .map((value) => value.trim())
+          .filter(Boolean),
+        validityDays: details.validityDays,
+        updatedAt: serverTimestamp(),
+        updatedBy: profile.uid,
+      });
+      setFeedback('Condiciones del borrador guardadas.');
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : 'No fue posible guardar.');
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function changeStatus(status: string) {
+    setWorking(true);
+    try {
+      await callBackend('updateQuoteStatus', {
+        quoteId,
+        status,
+        idempotencyKey: crypto.randomUUID(),
+      });
+      setFeedback('Seguimiento de cotización actualizado.');
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : 'No fue posible actualizar.');
     } finally {
       setWorking(false);
     }
@@ -146,10 +189,10 @@ export function QuoteBuilderPage() {
   async function revise() {
     setWorking(true);
     try {
-      const response = await callBackend<{ quoteId: string }, { quoteId: string }>(
-        'createQuoteRevision',
-        { quoteId },
-      );
+      const response = await callBackend<
+        { quoteId: string; idempotencyKey: string },
+        { quoteId: string }
+      >('createQuoteRevision', { quoteId, idempotencyKey: crypto.randomUUID() });
       await navigate(`/cotizaciones/${response.quoteId}`);
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : 'No fue posible crear revisión.');
@@ -202,7 +245,7 @@ export function QuoteBuilderPage() {
       />
       <section className="quote-layout">
         <div className="page-stack">
-          {!quote.locked ? (
+          {editable ? (
             <Card title="Insertar del catálogo">
               <div className="catalog-strip">
                 {catalog.data
@@ -239,6 +282,51 @@ export function QuoteBuilderPage() {
               </div>
             </Card>
           ) : null}
+          {editable ? (
+            <Card title="Vigencia, notas y condiciones">
+              <div className="form-grid">
+                <Field label="Vigencia (días)">
+                  <input
+                    min="1"
+                    max="365"
+                    type="number"
+                    value={details.validityDays}
+                    onChange={(event) =>
+                      setDetails({ ...details, validityDays: Number(event.target.value) })
+                    }
+                  />
+                </Field>
+                <Field label="Notas">
+                  <textarea
+                    rows={3}
+                    value={details.notes}
+                    onChange={(event) => setDetails({ ...details, notes: event.target.value })}
+                  />
+                </Field>
+                <Field label="Condiciones" hint="Una condición por línea.">
+                  <textarea
+                    rows={5}
+                    value={details.conditions}
+                    onChange={(event) => setDetails({ ...details, conditions: event.target.value })}
+                  />
+                </Field>
+                <button className="button button-secondary" onClick={() => void saveDetails()}>
+                  <Save size={17} /> Guardar condiciones
+                </button>
+              </div>
+            </Card>
+          ) : null}
+          {preview ? (
+            <Card title="Vista previa económica">
+              <p>
+                <strong>{quote.clientId}</strong> · {quote.folio ?? 'Borrador sin folio'}
+              </p>
+              <p>
+                {calculated.length} partidas · Total {summary.total.toFixed(2)} MXN
+              </p>
+              <p>{details.notes || 'Sin notas.'}</p>
+            </Card>
+          ) : null}
           <Card title="Partidas de la cotización">
             {calculated.length === 0 ? (
               <div className="empty-inline">
@@ -272,7 +360,7 @@ export function QuoteBuilderPage() {
                         <td>{item.discountPercent}%</td>
                         <td>{item.totalAmount.toFixed(2)}</td>
                         <td>
-                          {!quote.locked ? (
+                          {editable ? (
                             <button
                               className="icon-button danger"
                               aria-label="Eliminar partida"
@@ -289,7 +377,7 @@ export function QuoteBuilderPage() {
               </div>
             )}
           </Card>
-          {!quote.locked ? (
+          {editable ? (
             <Card title="Partida personalizada">
               <form className="form-grid" onSubmit={(event) => void addCustom(event)}>
                 <Field label="Código">
@@ -377,22 +465,65 @@ export function QuoteBuilderPage() {
               </div>
             </dl>
             {feedback ? <div className="notice">{feedback}</div> : null}
-            {quote.locked ? (
-              <button
-                className="button button-secondary button-full"
-                disabled={working}
-                onClick={() => void revise()}
-              >
-                Crear nueva revisión
-              </button>
+            {editable ? (
+              <>
+                <button
+                  className="button button-secondary button-full"
+                  onClick={() => setPreview((value) => !value)}
+                >
+                  <Eye size={17} /> {preview ? 'Cerrar vista previa' : 'Vista previa'}
+                </button>
+                <button
+                  className="button button-primary button-full"
+                  disabled={working || calculated.length === 0}
+                  onClick={() => void issue()}
+                >
+                  Emitir y generar PDF
+                </button>
+              </>
+            ) : quote.locked ? (
+              <>
+                {quote.documentId ? (
+                  <button
+                    className="button button-primary button-full"
+                    onClick={() => void openPrivateDocument(quote.documentId!)}
+                  >
+                    <Download size={17} /> Abrir PDF privado
+                  </button>
+                ) : null}
+                {quote.status === 'issued' ? (
+                  <button
+                    className="button button-secondary button-full"
+                    onClick={() => void changeStatus('sent')}
+                  >
+                    Marcar enviada
+                  </button>
+                ) : null}
+                {quote.status === 'sent' ? (
+                  <select
+                    aria-label="Seguimiento de cotización"
+                    defaultValue=""
+                    onChange={(event) =>
+                      event.target.value && void changeStatus(event.target.value)
+                    }
+                  >
+                    <option value="">Actualizar seguimiento</option>
+                    <option value="accepted">Aceptada</option>
+                    <option value="rejected">Rechazada</option>
+                    <option value="expired">Vencida</option>
+                    <option value="cancelled">Cancelada</option>
+                  </select>
+                ) : null}
+                <button
+                  className="button button-secondary button-full"
+                  disabled={working}
+                  onClick={() => void revise()}
+                >
+                  Crear nueva revisión
+                </button>
+              </>
             ) : (
-              <button
-                className="button button-primary button-full"
-                disabled={working || calculated.length === 0}
-                onClick={() => void issue()}
-              >
-                Emitir y generar PDF
-              </button>
+              <div className="notice">Emisión en proceso. Esta cotización no admite edición.</div>
             )}
             <p className="helper-text">Una vez emitida, la cotización es inmutable.</p>
           </Card>

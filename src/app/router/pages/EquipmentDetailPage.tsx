@@ -2,32 +2,17 @@ import { FileText, MapPin, Snowflake, Wrench } from 'lucide-react';
 import { where } from 'firebase/firestore';
 import { useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import type { Equipment, ServiceRequest } from '../../../domain/model';
-import { useAuth, useOperationalProfile } from '../../auth/AuthProvider';
+import type { Equipment } from '../../../domain/model';
+import { decodeEquipment } from '../../../domain/firestore-validation';
 import { Card, LoadingState, PageHeader, StatusBadge } from '../../../shared/components/Ui';
 import { useCollectionData } from '../../../shared/hooks/useCollectionData';
+import { useAuthorizedRequests } from '../../../shared/hooks/useAuthorizedRequests';
 
 export function EquipmentDetailPage() {
   const { equipmentId = '' } = useParams();
-  const { profile } = useAuth();
-  const operational = useOperationalProfile();
-  const requestScope = useMemo(
-    () =>
-      operational === 'primary_admin' || operational === 'promoted_admin'
-        ? [where('equipmentId', '==', equipmentId)]
-        : operational === 'supervisor'
-          ? [
-              where('equipmentId', '==', equipmentId),
-              where('supervisorId', '==', profile?.uid ?? ''),
-            ]
-          : [
-              where('equipmentId', '==', equipmentId),
-              where('assigneeId', '==', profile?.uid ?? ''),
-            ],
-    [equipmentId, operational, profile?.uid],
-  );
-  const equipment = useCollectionData<Equipment>('equipment');
-  const requests = useCollectionData<ServiceRequest>('requests', requestScope);
+  const requestScope = useMemo(() => [where('equipmentId', '==', equipmentId)], [equipmentId]);
+  const equipment = useCollectionData<Equipment>('equipment', decodeEquipment);
+  const requests = useAuthorizedRequests(requestScope);
   const item = equipment.data.find((candidate) => candidate.id === equipmentId);
   if (equipment.loading) return <LoadingState />;
   if (!item)

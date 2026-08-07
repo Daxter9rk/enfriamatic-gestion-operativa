@@ -1,6 +1,7 @@
 import { Search, UserPlus, UsersRound } from 'lucide-react';
 import { useMemo, useState, type FormEvent } from 'react';
 import type { UserProfile } from '../../../domain/model';
+import { decodeUserProfile } from '../../../domain/firestore-validation';
 import { callBackend } from '../../../shared/services/callables';
 import { useCollectionData } from '../../../shared/hooks/useCollectionData';
 import {
@@ -12,13 +13,21 @@ import {
   PageHeader,
   StatusBadge,
 } from '../../../shared/components/Ui';
+import { useAuth } from '../../auth/AuthContext';
 
 export function UsersPage() {
-  const users = useCollectionData<UserProfile>('users');
+  const auth = useAuth();
+  const actor = auth.profile;
+  const reauthenticate = (password: string) => auth.reauthenticate(password);
+  const users = useCollectionData<UserProfile>('users', decodeUserProfile);
   const [search, setSearch] = useState('');
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [reauthPassword, setReauthPassword] = useState('');
+  const [hierarchy, setHierarchy] = useState<
+    Record<string, { supervisorId: string; teamId: string }>
+  >({});
   const [form, setForm] = useState({
     displayName: '',
     email: '',
@@ -43,7 +52,8 @@ export function UsersPage() {
     setSaving(true);
     setFeedback('');
     try {
-      await callBackend('createManagedUser', form);
+      await reauthenticate(reauthPassword);
+      await callBackend('createManagedUser', { ...form, idempotencyKey: crypto.randomUUID() });
       setCreating(false);
       setForm({
         displayName: '',
@@ -54,6 +64,7 @@ export function UsersPage() {
         temporaryPassword: '',
       });
       setFeedback('Usuario creado correctamente.');
+      setReauthPassword('');
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : 'No fue posible crear.');
     } finally {
@@ -61,11 +72,22 @@ export function UsersPage() {
     }
   }
 
-  async function action(uid: string, value: string) {
+  async function action(
+    uid: string,
+    value: string,
+    extra: { supervisorId?: string; teamId?: string } = {},
+  ) {
     setFeedback('');
     try {
-      await callBackend('updateManagedUser', { uid, action: value });
+      await reauthenticate(reauthPassword);
+      await callBackend('updateManagedUser', {
+        uid,
+        action: value,
+        ...extra,
+        idempotencyKey: crypto.randomUUID(),
+      });
       setFeedback('Estado actualizado.');
+      setReauthPassword('');
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : 'No fue posible actualizar.');
     }
@@ -109,7 +131,7 @@ export function UsersPage() {
                 onChange={(event) => setForm({ ...form, role: event.target.value })}
               >
                 <option value="operator">Operador</option>
-                <option value="admin">Administrador</option>
+                {actor?.isPrimaryAdmin ? <option value="admin">Administrador</option> : null}
               </select>
             </Field>
             <Field label="Supervisor directo">
@@ -143,6 +165,18 @@ export function UsersPage() {
                 onChange={(event) => setForm({ ...form, temporaryPassword: event.target.value })}
               />
             </Field>
+            <Field
+              label="Tu contraseña actual"
+              hint="Reautenticación obligatoria para crear usuarios."
+            >
+              <input
+                required
+                autoComplete="current-password"
+                type="password"
+                value={reauthPassword}
+                onChange={(event) => setReauthPassword(event.target.value)}
+              />
+            </Field>
             <div className="form-actions">
               <button
                 className="button button-secondary"
@@ -167,6 +201,16 @@ export function UsersPage() {
               placeholder="Buscar nombre, correo o estado"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
+            />
+          </label>
+          <label className="search-field">
+            <input
+              aria-label="Contraseña actual para reautenticación"
+              autoComplete="current-password"
+              placeholder="Contraseña actual para acciones críticas"
+              type="password"
+              value={reauthPassword}
+              onChange={(event) => setReauthPassword(event.target.value)}
             />
           </label>
         </div>
@@ -204,6 +248,14 @@ export function UsersPage() {
                       : reports > 0
                         ? 'Operador supervisor'
                         : 'Operador';
+                  const protectedTarget =
+                    user.isPrimaryAdmin ||
+                    user.uid === actor?.uid ||
+                    (!actor?.isPrimaryAdmin && user.role === 'admin');
+                  const hierarchyValue = hierarchy[user.uid] ?? {
+                    supervisorId: user.supervisorId ?? '',
+                    teamId: user.teamId ?? '',
+                  };
                   return (
                     <tr key={user.uid}>
                       <td>
@@ -226,13 +278,73 @@ export function UsersPage() {
                         </StatusBadge>
                       </td>
                       <td>
-                        {users.data.find((candidate) => candidate.uid === user.supervisorId)
-                          ?.displayName ?? '—'}
+                        {user.role === 'operator' && !protectedTarget ? (
+                          <div className="hierarchy-editor">
+                            <select
+                              aria-label={`Supervisor de ${user.displayName}`}
+                              value={hierarchyValue.supervisorId}
+                              onChange={(event) => {
+                                const selected = users.data.find(
+                                  (candidate) => candidate.uid === event.target.value,
+                                );
+                                setHierarchy((current) => ({
+                                  ...current,
+                                  [user.uid]: {
+                                    supervisorId: event.target.value,
+                                    teamId: selected?.teamId ?? hierarchyValue.teamId,
+                                  },
+                                }));
+                              }}
+                            >
+                              <option value="">Sin supervisor</option>
+                              {users.data
+                                .filter(
+                                  (candidate) =>
+                                    candidate.uid !== user.uid &&
+                                    candidate.role === 'operator' &&
+                                    candidate.status === 'active' &&
+                                    Boolean(candidate.teamId),
+                                )
+                                .map((candidate) => (
+                                  <option key={candidate.uid} value={candidate.uid}>
+                                    {candidate.displayName}
+                                  </option>
+                                ))}
+                            </select>
+                            <input
+                              aria-label={`Equipo de ${user.displayName}`}
+                              placeholder="ID de equipo"
+                              value={hierarchyValue.teamId}
+                              onChange={(event) =>
+                                setHierarchy((current) => ({
+                                  ...current,
+                                  [user.uid]: {
+                                    ...hierarchyValue,
+                                    teamId: event.target.value,
+                                  },
+                                }))
+                              }
+                            />
+                            <button
+                              className="button button-secondary button-small"
+                              disabled={!reauthPassword}
+                              onClick={() =>
+                                void action(user.uid, 'assignHierarchy', hierarchyValue)
+                              }
+                              type="button"
+                            >
+                              Guardar jerarquía
+                            </button>
+                          </div>
+                        ) : (
+                          (users.data.find((candidate) => candidate.uid === user.supervisorId)
+                            ?.displayName ?? '—')
+                        )}
                       </td>
                       <td>
                         <select
                           aria-label={`Acción para ${user.displayName}`}
-                          disabled={user.isPrimaryAdmin}
+                          disabled={protectedTarget || !reauthPassword}
                           defaultValue=""
                           onChange={(event) => {
                             if (event.target.value) void action(user.uid, event.target.value);
@@ -243,8 +355,11 @@ export function UsersPage() {
                           <option value="activate">Activar</option>
                           <option value="suspend">Suspender</option>
                           <option value="deactivate">Desactivar</option>
-                          {user.role === 'operator' ? (
+                          {user.role === 'operator' && actor?.isPrimaryAdmin ? (
                             <option value="promote">Promover a admin</option>
+                          ) : null}
+                          {user.role === 'admin' && actor?.isPrimaryAdmin ? (
+                            <option value="demote">Degradar a operador</option>
                           ) : null}
                         </select>
                       </td>
