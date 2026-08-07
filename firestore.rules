@@ -2,6 +2,198 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function validRole() {
+      return profile().role in ['admin', 'operator'];
+    }
+
+    function active() {
+      return signedIn() && profile().status == 'active' && validRole();
+    }
+
+    function admin() {
+      return active() && profile().role == 'admin';
+    }
+
+    function operator() {
+      return active() && profile().role == 'operator';
+    }
+
+    function ownsRequest(data) {
+      return data.createdBy == request.auth.uid || data.assigneeId == request.auth.uid;
+    }
+
+    function supervisesRequest(data) {
+      return operator() && data.supervisorId == request.auth.uid;
+    }
+
+    function canReadRequest(data) {
+      return admin() || ownsRequest(data) || supervisesRequest(data);
+    }
+
+    function draftQuote() {
+      return resource.data.status == 'draft' && resource.data.locked == false;
+    }
+
+    function safeRequestWorkUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'status',
+        'operationalStage',
+        'updatedAt',
+        'updatedBy'
+      ])
+      && request.resource.data.assigneeId == resource.data.assigneeId
+      && request.resource.data.createdBy == resource.data.createdBy
+      && request.resource.data.status in ['in_progress', 'completed']
+      && request.resource.data.operationalStage in [
+        'diagnosing',
+        'waiting_information',
+        'executing',
+        'quoting',
+        'follow_up'
+      ];
+    }
+
+    match /users/{userId} {
+      allow read: if active() && (
+        admin()
+        || userId == request.auth.uid
+        || resource.data.supervisorId == request.auth.uid
+      );
+      allow create, update, delete: if false;
+    }
+
+    match /teams/{teamId} {
+      allow read: if active() && (
+        admin()
+        || profile().teamId == teamId
+      );
+      allow write: if false;
+    }
+
+    match /clients/{clientId} {
+      allow read: if active();
+      allow create, update: if admin();
+      allow delete: if false;
+    }
+
+    match /sites/{siteId} {
+      allow read: if active();
+      allow create, update: if admin();
+      allow delete: if false;
+    }
+
+    match /equipment/{equipmentId} {
+      allow read: if active();
+      allow create, update: if admin();
+      allow delete: if false;
+    }
+
+    match /requests/{requestId} {
+      allow read: if active() && canReadRequest(resource.data);
+      allow create, delete: if false;
+      allow update: if active() && (
+        admin()
+        || (
+          resource.data.assigneeId == request.auth.uid
+          && safeRequestWorkUpdate()
+        )
+      );
+    }
+
+    match /catalogItems/{itemId} {
+      allow read: if active();
+      allow create, update: if admin();
+      allow delete: if false;
+    }
+
+    match /quotes/{quoteId} {
+      allow read: if active() && (
+        admin()
+        || resource.data.createdBy == request.auth.uid
+        || canReadRequest(
+          get(/databases/$(database)/documents/requests/$(resource.data.requestId)).data
+        )
+      );
+      allow create: if active()
+        && request.resource.data.status == 'draft'
+        && request.resource.data.locked == false
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.folio == null;
+      allow update: if active()
+        && draftQuote()
+        && request.resource.data.status == 'draft'
+        && request.resource.data.locked == false
+        && request.resource.data.folio == null
+        && (
+          admin()
+          || resource.data.createdBy == request.auth.uid
+        );
+      allow delete: if false;
+
+      match /items/{itemId} {
+        allow read: if active() && (
+          admin()
+          || get(/databases/$(database)/documents/quotes/$(quoteId)).data.createdBy
+             == request.auth.uid
+        );
+        allow create, update, delete: if active()
+          && get(/databases/$(database)/documents/quotes/$(quoteId)).data.status == 'draft'
+          && get(/databases/$(database)/documents/quotes/$(quoteId)).data.locked == false
+          && (
+            admin()
+            || get(/databases/$(database)/documents/quotes/$(quoteId)).data.createdBy
+               == request.auth.uid
+          );
+      }
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if active() && resource.data.userId == request.auth.uid;
+      allow update: if active()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt']);
+      allow create, delete: if false;
+    }
+
+    match /auditLogs/{logId} {
+      allow read: if active() && (
+        admin()
+        || resource.data.actorId == request.auth.uid
+        || resource.data.actorSupervisorId == request.auth.uid
+      );
+      allow write: if false;
+    }
+
+    match /settings/{settingId} {
+      allow read: if active();
+      allow create, update: if admin();
+      allow delete: if false;
+    }
+
+    match /manuals/{manualId} {
+      allow read: if active() && (
+        resource.data.audience in ['all', 'operator']
+        || admin()
+      );
+      allow write: if false;
+    }
+
+    match /documents/{documentId} {
+      allow read, write: if false;
+    }
+
+    match /counters/{counterId} {
+      allow read, write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

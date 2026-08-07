@@ -10,6 +10,7 @@ storage-debug.log
 functions-debug.log
 ui-debug.log
 *.local
+.credentials/
 .env.local
 .env.*.local
 functions/lib/

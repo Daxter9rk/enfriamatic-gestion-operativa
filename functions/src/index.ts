@@ -16,3 +16,9 @@ export const healthCheck = onRequest(
     response.status(200).json(buildHealthStatus());
   },
 );
+
+export { createServiceRequest } from './create-request.js';
+export { getPrivateDownloadUrl, uploadPrivateFile } from './files.js';
+export { assignServiceRequest } from './requests.js';
+export { createQuoteRevision, issueQuote } from './quotes.js';
+export { createManagedUser, updateManagedUser } from './users.js';
