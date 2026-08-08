@@ -281,12 +281,18 @@ batch.set(db.doc('settings/app'), {
   policyStatus: 'dev_provisional',
   ...meta(primaryId),
 });
-batch.set(db.doc('counters/requests-2026'), { value: 2 });
+batch.set(db.doc('counters/requests-2026'), { value: 4 });
 batch.set(db.doc('counters/quotes-2026'), { value: 0 });
 
+const requestFolios = {
+  'request-a': 'SOL-EMU-2026-00001',
+  'request-b': 'SOL-EMU-2026-00002',
+  'request-desktop': 'SOL-EMU-2026-00003',
+  'request-mobile': 'SOL-EMU-2026-00004',
+};
 const request = (id, team, assigneeId, supervisorId, createdBy) => ({
   id,
-  folio: id === 'request-a' ? 'SOL-EMU-2026-00001' : 'SOL-EMU-2026-00002',
+  folio: requestFolios[id],
   clientId: `client-${team}`,
   siteId: `site-${team}`,
   equipmentId: `equipment-${team}`,
@@ -311,6 +317,13 @@ batch.set(
   db.doc('requests/request-b'),
   request('request-b', 'b', ids.operatorB, ids.supervisorB, ids.supervisorB),
 );
+for (const variant of ['desktop', 'mobile']) {
+  const requestId = `request-${variant}`;
+  batch.set(
+    db.doc(`requests/${requestId}`),
+    request(requestId, 'a', ids.operatorA, ids.supervisorA, ids.supervisorA),
+  );
+}
 
 batch.set(db.doc('quotes/quote-a'), {
   id: 'quote-a',
@@ -351,6 +364,48 @@ batch.set(db.doc('quotes/quote-a/items/item-1'), {
   updatedAt: now,
   updatedBy: ids.operatorA,
 });
+for (const variant of ['desktop', 'mobile']) {
+  const quoteId = `quote-${variant}`;
+  batch.set(db.doc(`quotes/${quoteId}`), {
+    id: quoteId,
+    folio: null,
+    revision: 0,
+    revisionNumber: 0,
+    originalQuoteId: null,
+    requestId: `request-${variant}`,
+    clientId: 'client-a',
+    siteId: 'site-a',
+    equipmentId: 'equipment-a',
+    supervisorId: ids.supervisorA,
+    clientName: 'Cliente Ártico EMU',
+    status: 'draft',
+    locked: false,
+    discountDisplayMode: 'detailed',
+    validityDays: 15,
+    notes: `Cotización ${variant} EMU`,
+    conditions: ['Condición ficticia EMU.'],
+    totals: { gross: 0, discount: 0, subtotal: 0, tax: 0, total: 0 },
+    documentStatus: 'not_generated',
+    documentId: null,
+    ...meta(ids.operatorA),
+  });
+  batch.set(db.doc(`quotes/${quoteId}/items/item-1`), {
+    id: 'item-1',
+    catalogItemId: 'catalog-service',
+    code: 'EMU-SERV-1',
+    description: `Diagnóstico ${variant} EMU`,
+    unit: 'servicio',
+    quantity: 1,
+    originalUnitPrice: 1000,
+    discountPercent: 5,
+    taxRate: 0.16,
+    discountDisplayMode: 'detailed',
+    createdAt: now,
+    createdBy: ids.operatorA,
+    updatedAt: now,
+    updatedBy: ids.operatorA,
+  });
+}
 
 await batch.commit();
 

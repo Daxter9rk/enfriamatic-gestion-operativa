@@ -87,7 +87,7 @@ export function QuoteBuilderPage() {
     }
   }
 
-  async function addLine(input: Omit<QuoteLineInput, 'id'>) {
+  async function addLine(input: Omit<QuoteLineInput, 'id'>, resetCustomForm = false) {
     if (!editable || !profile) return;
     setWorking(true);
     setFeedback('');
@@ -100,7 +100,7 @@ export function QuoteBuilderPage() {
         updatedAt: serverTimestamp(),
         updatedBy: profile.uid,
       });
-      setLine(blankLine);
+      if (resetCustomForm) setLine(blankLine);
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : 'No fue posible agregar.');
     } finally {
@@ -110,16 +110,19 @@ export function QuoteBuilderPage() {
 
   async function addCustom(event: FormEvent) {
     event.preventDefault();
-    await addLine({
-      catalogItemId: null,
-      code: line.code || 'PERSONALIZADA',
-      description: line.description,
-      unit: line.unit,
-      quantity: Number(line.quantity),
-      originalUnitPrice: Number(line.originalUnitPrice),
-      discountPercent: Number(line.discountPercent),
-      taxRate: Number(line.taxRate),
-    });
+    await addLine(
+      {
+        catalogItemId: null,
+        code: line.code || 'PERSONALIZADA',
+        description: line.description,
+        unit: line.unit,
+        quantity: Number(line.quantity),
+        originalUnitPrice: Number(line.originalUnitPrice),
+        discountPercent: Number(line.discountPercent),
+        taxRate: Number(line.taxRate),
+      },
+      true,
+    );
   }
 
   async function remove(item: QuoteLine) {

@@ -8,7 +8,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { where } from 'firebase/firestore';
-import { useMemo, useState, type FormEvent } from 'react';
+import { useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Client, Equipment, Site, UserProfile } from '../../../domain/model';
 import {
@@ -69,6 +69,7 @@ export function RequestWizardPage() {
   const [draft, setDraft] = useState(initialDraft);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const idempotencyKey = useRef(crypto.randomUUID());
 
   const availableSites = useMemo(
     () => sites.data.filter((site) => site.clientId === draft.clientId && site.active),
@@ -105,9 +106,9 @@ export function RequestWizardPage() {
     setError('');
     setSubmitting(true);
     try {
-      const response = await callBackend<Draft, { requestId: string }>(
+      const response = await callBackend<Draft & { idempotencyKey: string }, { requestId: string }>(
         'createServiceRequest',
-        draft,
+        { ...draft, idempotencyKey: idempotencyKey.current },
       );
       await navigate(`/solicitudes/${response.requestId}`);
     } catch (cause) {

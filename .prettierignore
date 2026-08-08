@@ -4,5 +4,8 @@ coverage
 .firebase
 functions/lib
 functions/node_modules
+playwright-report
+test-results
 package-lock.json
 functions/package-lock.json
+.env.*

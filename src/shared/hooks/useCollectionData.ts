@@ -28,8 +28,16 @@ export function useCollectionData<T>(
     return onSnapshot(
       reference,
       (snapshot) => {
+        const decoded = snapshot.docs.flatMap((item) => {
+          try {
+            return [decoder(item.id, item.data())];
+          } catch (error) {
+            console.error(`Documento inválido omitido en ${path}/${item.id}.`, error);
+            return [];
+          }
+        });
         setState({
-          data: snapshot.docs.map((item) => decoder(item.id, item.data())),
+          data: decoded,
           loading: false,
           error: null,
         });
