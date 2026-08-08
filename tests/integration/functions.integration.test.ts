@@ -106,14 +106,14 @@ describe('Functions integradas con Auth, Firestore y Storage Emulator', () => {
   it('impide cruces de equipo y permite asignación propia o a subordinado directo', async () => {
     const assigned = await call<{ ok: boolean }>('supervisorA', 'assignServiceRequest', {
       requestId: 'request-a',
-      assigneeId: (await signed('operatorA')).auth.currentUser?.uid,
+      recipientId: (await signed('operatorA')).auth.currentUser?.uid,
       idempotencyKey: randomUUID(),
     });
     expect(assigned.ok).toBe(true);
     await expectCode(
       call('supervisorA', 'assignServiceRequest', {
         requestId: 'request-b',
-        assigneeId: (await signed('operatorA')).auth.currentUser?.uid,
+        recipientId: (await signed('operatorA')).auth.currentUser?.uid,
         idempotencyKey: randomUUID(),
       }),
       'functions/permission-denied',
@@ -121,7 +121,7 @@ describe('Functions integradas con Auth, Firestore y Storage Emulator', () => {
     await expectCode(
       call('supervisorA', 'assignServiceRequest', {
         requestId: 'request-a',
-        assigneeId: (await signed('operatorB')).auth.currentUser?.uid,
+        recipientId: (await signed('operatorB')).auth.currentUser?.uid,
         idempotencyKey: randomUUID(),
       }),
       'functions/permission-denied',

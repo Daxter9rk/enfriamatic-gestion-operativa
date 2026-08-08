@@ -29,6 +29,7 @@ export const createServiceRequest = onCall(
     const quoteRequirement = text(data.quoteRequirement, 'quoteRequirement', 20);
     const requestedDate = text(data.requestedDate, 'requestedDate', 10);
     const description = text(data.description, 'description', 2000);
+    const idempotencyKey = text(data.idempotencyKey, 'idempotencyKey', 128);
     const requestedAssigneeId = optionalText(data.assigneeId, 'assigneeId', 128);
     const assigneeId =
       actor.role === 'operator' ? (requestedAssigneeId ?? actor.uid) : requestedAssigneeId;
@@ -41,8 +42,18 @@ export const createServiceRequest = onCall(
     }
 
     const requestRef = db.collection('requests').doc();
+    const operationRef = db.collection('idempotencyKeys').doc(`request-create-${idempotencyKey}`);
     const year = new Date().getUTCFullYear();
-    await db.runTransaction(async (transaction) => {
+    return db.runTransaction(async (transaction) => {
+      const operationSnapshot = await transaction.get(operationRef);
+      if (operationSnapshot.exists) {
+        const priorRequestId: unknown = operationSnapshot.get('resultRequestId');
+        const priorFolio: unknown = operationSnapshot.get('folio');
+        if (typeof priorRequestId !== 'string' || typeof priorFolio !== 'string') {
+          throw new HttpsError('data-loss', 'La operación idempotente está incompleta.');
+        }
+        return { requestId: priorRequestId, folio: priorFolio, replayed: true };
+      }
       const [settingsSnapshot, clientSnapshot, siteSnapshot, equipmentSnapshot] = await Promise.all(
         [
           transaction.get(db.collection('settings').doc('app')),
@@ -126,6 +137,13 @@ export const createServiceRequest = onCall(
       };
       transaction.set(counterRef, { value: next, updatedAt: FieldValue.serverTimestamp() });
       transaction.create(requestRef, payload);
+      transaction.create(operationRef, {
+        operation: 'request.created',
+        actorId: actor.uid,
+        resultRequestId: requestRef.id,
+        folio,
+        createdAt: FieldValue.serverTimestamp(),
+      });
       transaction.create(
         db.collection('auditLogs').doc(),
         auditRecord(actor, 'request.created', 'requests', requestRef.id, null, {
@@ -146,7 +164,7 @@ export const createServiceRequest = onCall(
           schemaVersion: 1,
         });
       }
+      return { requestId: requestRef.id, folio, replayed: false };
     });
-    return { requestId: requestRef.id };
   },
 );

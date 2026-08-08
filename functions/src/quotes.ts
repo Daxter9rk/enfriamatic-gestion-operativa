@@ -586,8 +586,18 @@ export const createQuoteRevision = onCall(
       const rawSource = sourceSnapshot.data();
       if (!rawSource) throw new HttpsError('data-loss', 'Cotización sin datos.');
       const revisionNumber = source.revisionNumber + 1;
+      const cleanSource = { ...rawSource };
+      for (const transientField of [
+        'idempotencyKey',
+        'generationToken',
+        'generationError',
+        'issuedAt',
+        'issuedBy',
+      ]) {
+        Reflect.deleteProperty(cleanSource, transientField);
+      }
       const revision = {
-        ...rawSource,
+        ...cleanSource,
         id: revisionRef.id,
         folio,
         status: 'draft',
@@ -598,11 +608,6 @@ export const createQuoteRevision = onCall(
         revision: revisionNumber,
         documentId: null,
         documentStatus: 'not_generated',
-        idempotencyKey: FieldValue.delete(),
-        generationToken: FieldValue.delete(),
-        generationError: FieldValue.delete(),
-        issuedAt: FieldValue.delete(),
-        issuedBy: FieldValue.delete(),
         createdAt: FieldValue.serverTimestamp(),
         createdBy: actor.uid,
         updatedAt: FieldValue.serverTimestamp(),
