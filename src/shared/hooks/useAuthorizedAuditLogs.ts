@@ -4,6 +4,7 @@ import { useAuth } from '../../app/auth/AuthContext';
 import type { AuditLog } from '../../domain/model';
 import { decodeAuditLog } from '../../domain/firestore-validation';
 import { getFirebaseServices } from '../services/firebase';
+import { decodeDocuments } from './useCollectionData';
 
 export function useAuthorizedAuditLogs() {
   const { profile } = useAuth();
@@ -34,10 +35,7 @@ export function useAuthorizedAuditLogs() {
         scope,
         (snapshot) => {
           if (!values.has(index)) loaded += 1;
-          values.set(
-            index,
-            snapshot.docs.map((item) => decodeAuditLog(item.id, item.data())),
-          );
+          values.set(index, decodeDocuments('auditLogs', snapshot.docs, decodeAuditLog));
           publish();
         },
         (error) => setState({ data: [], loading: false, error: error.message }),

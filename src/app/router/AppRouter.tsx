@@ -13,7 +13,9 @@ const route = <T extends Record<string, unknown>>(loader: () => Promise<T>, name
 const ActivityPage = route(() => import('./pages/ActivityPage'), 'ActivityPage');
 const DashboardPage = route(() => import('./pages/DashboardPage'), 'DashboardPage');
 const ClientsPage = route(() => import('./pages/DirectoryPages'), 'ClientsPage');
+const ClientDetailPage = route(() => import('./pages/ClientDetailPage'), 'ClientDetailPage');
 const SitesPage = route(() => import('./pages/DirectoryPages'), 'SitesPage');
+const SiteDetailPage = route(() => import('./pages/SiteDetailPage'), 'SiteDetailPage');
 const EquipmentPage = route(() => import('./pages/DirectoryPages'), 'EquipmentPage');
 const CatalogPage = route(() => import('./pages/DirectoryPages'), 'CatalogPage');
 const EquipmentDetailPage = route(
@@ -49,7 +51,9 @@ export function AppRouter() {
           <Route path="cotizaciones/nueva" element={<QuoteBuilderPage />} />
           <Route path="cotizaciones/:quoteId" element={<QuoteBuilderPage />} />
           <Route path="clientes" element={<ClientsPage />} />
+          <Route path="clientes/:clientId" element={<ClientDetailPage />} />
           <Route path="instalaciones" element={<SitesPage />} />
+          <Route path="instalaciones/:siteId" element={<SiteDetailPage />} />
           <Route path="equipos" element={<EquipmentPage />} />
           <Route path="equipos/:equipmentId" element={<EquipmentDetailPage />} />
           <Route path="catalogo" element={<CatalogPage />} />

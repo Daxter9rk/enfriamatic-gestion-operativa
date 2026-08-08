@@ -164,6 +164,7 @@ export const decodeEquipment: DocumentDecoder<Equipment> = (id, value) => {
   }
   return {
     id,
+    name: string(source, 'name', 'equipment'),
     clientId: string(source, 'clientId', 'equipment'),
     siteId: string(source, 'siteId', 'equipment'),
     category: string(source, 'category', 'equipment'),

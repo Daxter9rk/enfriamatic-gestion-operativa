@@ -1,4 +1,8 @@
-# Informe de bootstrap
+# Informe histórico de bootstrap
+
+> Este documento conserva el estado del bootstrap inicial. La implementación V3 posterior está
+> descrita en el README, el Documento Maestro y la documentación operativa actual; las limitaciones
+> registradas aquí no representan el estado vigente.
 
 ## Estado
 

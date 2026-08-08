@@ -160,8 +160,8 @@ service cloud.firestore {
 
     match /manuals/{manualId} {
       allow read: if active() && (
-        resource.data.accessScope == 'all_active'
-        || (resource.data.accessScope == 'admin_only' && admin())
+        admin()
+        || resource.data.accessScope == 'all_active'
       );
       allow write: if false;
     }

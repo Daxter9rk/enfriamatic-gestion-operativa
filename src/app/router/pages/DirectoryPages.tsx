@@ -8,6 +8,7 @@ export function ClientsPage() {
       title="Clientes"
       description="Contactos, datos disponibles e historial operativo."
       collectionName="clients"
+      detailsPath="/clientes"
       columns={[
         { key: 'name', label: 'Cliente' },
         { key: 'contactName', label: 'Contacto' },
@@ -32,6 +33,7 @@ export function SitesPage() {
       title="Instalaciones"
       description="Ubicaciones, contactos, acceso y equipos relacionados."
       collectionName="sites"
+      detailsPath="/instalaciones"
       columns={[
         { key: 'name', label: 'Instalación' },
         { key: 'type', label: 'Tipo' },

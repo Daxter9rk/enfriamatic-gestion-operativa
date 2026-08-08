@@ -4,7 +4,16 @@ import {
   assertSucceeds,
   initializeTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  setDoc,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
 import { getBytes, ref, uploadBytes } from 'firebase/storage';
 import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
 
@@ -200,6 +209,10 @@ describe('cotizaciones y recursos sensibles', () => {
     await assertSucceeds(getDoc(doc(operatorDb, 'manuals/general')));
     await assertFails(getDoc(doc(operatorDb, 'manuals/admin')));
     await assertSucceeds(getDoc(doc(adminDb, 'manuals/admin')));
+    await assertSucceeds(getDocs(collection(adminDb, 'manuals')));
+    await assertSucceeds(
+      getDocs(query(collection(operatorDb, 'manuals'), where('accessScope', '==', 'all_active'))),
+    );
   });
 });
 

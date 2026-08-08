@@ -1,4 +1,5 @@
 # Mockups
 
-No se incluyeron archivos de mockup en los adjuntos disponibles para esta misión. El shell visual se
-limitó a la especificación escrita y no reutilizó recursos de V2.
+Durante el bootstrap inicial no se incluyeron archivos de mockup. Posteriormente se recibieron ocho
+referencias visuales y se usaron conforme al Documento Maestro: como orientación de composición y
+densidad, no como fuente de reglas de negocio. El shell visual no reutiliza recursos de V2.

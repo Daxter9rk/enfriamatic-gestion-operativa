@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/full-v3-dev]
   pull_request:
     branches: [main]
 
@@ -12,7 +12,7 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -50,3 +50,12 @@ jobs:
 
       - name: Validate Functions
         run: npm --prefix functions run validate
+
+      - name: Install Chromium for E2E
+        run: npx playwright install --with-deps chromium
+
+      - name: Rules and integrated emulator tests
+        run: npm run test:emulators
+
+      - name: Desktop and mobile E2E
+        run: npm run test:e2e:emulators

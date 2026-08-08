@@ -17,6 +17,23 @@ const { FieldValue, getFirestore, Timestamp } = functionsRequire('firebase-admin
 const { getStorage } = functionsRequire('firebase-admin/storage');
 const { PDFDocument, StandardFonts, rgb } = functionsRequire('pdf-lib');
 
+const projectFlag = process.argv.findIndex((argument) => argument === '--project');
+const requestedProject = projectFlag >= 0 ? process.argv[projectFlag + 1] : PROJECT_ID;
+if (requestedProject !== PROJECT_ID) {
+  throw new Error(`Project ID no autorizado para seed DEV: ${requestedProject ?? '(ausente)'}`);
+}
+
+for (const name of [
+  'FIREBASE_AUTH_EMULATOR_HOST',
+  'FIRESTORE_EMULATOR_HOST',
+  'FIREBASE_STORAGE_EMULATOR_HOST',
+  'FUNCTIONS_EMULATOR',
+]) {
+  if (process.env[name]) {
+    throw new Error(`${name} está definido; seed-dev sólo admite el proyecto Firebase DEV remoto.`);
+  }
+}
+
 if (process.env.GCLOUD_PROJECT && process.env.GCLOUD_PROJECT !== PROJECT_ID) {
   throw new Error(`Proyecto efectivo no autorizado: ${process.env.GCLOUD_PROJECT}`);
 }

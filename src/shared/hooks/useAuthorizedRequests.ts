@@ -4,6 +4,7 @@ import { useAuth } from '../../app/auth/AuthContext';
 import type { ServiceRequest } from '../../domain/model';
 import { decodeServiceRequest } from '../../domain/firestore-validation';
 import { getFirebaseServices } from '../services/firebase';
+import { decodeDocuments } from './useCollectionData';
 
 interface State {
   data: ServiceRequest[];
@@ -48,10 +49,7 @@ export function useAuthorizedRequests(extraConstraints: QueryConstraint[] = none
         (snapshot) => {
           if (stopped) return;
           if (!results.has(index)) loaded += 1;
-          results.set(
-            index,
-            snapshot.docs.map((item) => decodeServiceRequest(item.id, item.data())),
-          );
+          results.set(index, decodeDocuments('requests', snapshot.docs, decodeServiceRequest));
           publish();
         },
         (error) => {

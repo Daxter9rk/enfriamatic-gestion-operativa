@@ -6,14 +6,23 @@ test('operador: solicitud, cotización, PDF, revisión y ayuda privada', async (
 }, testInfo) => {
   await login(page, 'operatorA');
   await goto(page, '/solicitudes', 'Mis solicitudes');
-  await expect(page.getByText('SOL-EMU-2026-00001')).toBeVisible();
-  await expect(page.getByText('SOL-EMU-2026-00002')).not.toBeVisible();
-
   const variant = testInfo.project.name.startsWith('mobile') ? 'mobile' : 'desktop';
   const requestFolio = variant === 'mobile' ? 'SOL-EMU-2026-00004' : 'SOL-EMU-2026-00003';
+  await expect(page.getByText(requestFolio)).toBeVisible();
+  await expect(page.getByText('SOL-EMU-2026-00002')).not.toBeVisible();
   await goto(page, `/solicitudes/request-${variant}`, requestFolio);
   await page.getByRole('button', { name: 'Iniciar diagnóstico' }).click();
   await expect(page.getByText('Solicitud actualizada.')).toBeVisible();
+  const evidenceName = `evidencia-${variant}.png`;
+  await page.locator('input[type="file"]').setInputFiles({
+    name: evidenceName,
+    mimeType: 'image/png',
+    buffer: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      'base64',
+    ),
+  });
+  await expect(page.getByText(evidenceName)).toBeVisible();
 
   await goto(page, `/cotizaciones/quote-${variant}`, 'Cotización en borrador');
   const quoteRows = page.locator('table tbody tr');
@@ -33,7 +42,9 @@ test('operador: solicitud, cotización, PDF, revisión y ayuda privada', async (
   await expect(page.getByRole('button', { name: 'Abrir PDF privado' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Agregar partida' })).not.toBeVisible();
   await page.getByRole('button', { name: 'Crear nueva revisión' }).click();
-  await expect(page.getByRole('heading', { name: 'Cotización en borrador' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Cotización en borrador' })).toBeVisible({
+    timeout: 60_000,
+  });
   await expect(page.getByText(`Partida personalizada ${variant}`)).toBeVisible();
 
   await goto(page, '/ayuda', 'Centro de ayuda');

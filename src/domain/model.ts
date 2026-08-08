@@ -55,6 +55,7 @@ export interface Site extends EntityMeta {
 
 export interface Equipment extends EntityMeta {
   id: string;
+  name: string;
   clientId: string;
   siteId: string;
   category: string;
