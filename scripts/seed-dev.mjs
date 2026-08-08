@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -9,9 +9,10 @@ const BUCKET = `${PROJECT_ID}.firebasestorage.app`;
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, '..');
 const credentialsPath = resolve(repositoryRoot, '.credentials', `${PROJECT_ID}-users.local.json`);
+const temporaryAdcPath = resolve(repositoryRoot, '.credentials', '.firebase-cli-adc.tmp.json');
 const rootRequire = createRequire(import.meta.url);
 const functionsRequire = createRequire(resolve(repositoryRoot, 'functions', 'package.json'));
-const { initializeApp } = functionsRequire('firebase-admin/app');
+const { applicationDefault, initializeApp } = functionsRequire('firebase-admin/app');
 const { getAuth } = functionsRequire('firebase-admin/auth');
 const { FieldValue, getFirestore, Timestamp } = functionsRequire('firebase-admin/firestore');
 const { getStorage } = functionsRequire('firebase-admin/storage');
@@ -41,6 +42,7 @@ if (process.env.GCLOUD_PROJECT && process.env.GCLOUD_PROJECT !== PROJECT_ID) {
 const cliAuth = rootRequire('firebase-tools/lib/auth');
 const { requireAuth } = rootRequire('firebase-tools/lib/requireAuth');
 const cliApi = rootRequire('firebase-tools/lib/apiv2');
+const cliOAuth = rootRequire('firebase-tools/lib/api');
 
 const account = cliAuth.getGlobalDefaultAccount();
 if (!account?.user?.email || !account.tokens) {
@@ -55,12 +57,22 @@ const cliOptions = {
 };
 await requireAuth(cliOptions);
 
-const credential = {
-  async getAccessToken() {
-    const accessToken = await cliApi.getAccessToken();
-    return { access_token: accessToken, expires_in: 3600 };
-  },
-};
+const refreshToken = account.tokens.refresh_token;
+if (!refreshToken)
+  throw new Error('La sesión de Firebase CLI no contiene refresh token reutilizable.');
+await mkdir(dirname(temporaryAdcPath), { recursive: true });
+await writeFile(
+  temporaryAdcPath,
+  JSON.stringify({
+    type: 'authorized_user',
+    client_id: cliOAuth.clientId,
+    client_secret: cliOAuth.clientSecret,
+    refresh_token: refreshToken,
+  }),
+  { encoding: 'utf8', mode: 0o600 },
+);
+const previousGoogleCredentials = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+process.env.GOOGLE_APPLICATION_CREDENTIALS = temporaryAdcPath;
 
 async function enablePasswordAuthentication() {
   const accessToken = await cliApi.getAccessToken();
@@ -81,13 +93,9 @@ async function enablePasswordAuthentication() {
   }
 }
 
-const app = initializeApp({ credential, projectId: PROJECT_ID, storageBucket: BUCKET });
-if (app.options.projectId !== PROJECT_ID) {
-  throw new Error(`SDK Admin inicializado contra proyecto no autorizado: ${app.options.projectId}`);
-}
-const auth = getAuth();
-const db = getFirestore();
-const bucket = getStorage().bucket(BUCKET);
+let auth;
+let db;
+let bucket;
 
 const userDefinitions = [
   {
@@ -598,15 +606,35 @@ async function seedFirestore(ids, manualFiles) {
   await batch.commit();
 }
 
-console.log(`[preflight] Proyecto autorizado para Auth: ${PROJECT_ID}`);
-await enablePasswordAuthentication();
-const identities = await upsertUsers();
-console.log(`[preflight] Proyecto autorizado para Storage: ${PROJECT_ID}`);
-const manualFiles = await uploadFixtures(identities.primaryAdmin);
-console.log(`[preflight] Proyecto autorizado para Firestore: ${PROJECT_ID}`);
-await seedFirestore(identities, manualFiles);
+try {
+  const app = initializeApp({
+    credential: applicationDefault(),
+    projectId: PROJECT_ID,
+    storageBucket: BUCKET,
+  });
+  if (app.options.projectId !== PROJECT_ID) {
+    throw new Error(
+      `SDK Admin inicializado contra proyecto no autorizado: ${app.options.projectId}`,
+    );
+  }
+  auth = getAuth();
+  db = getFirestore();
+  bucket = getStorage().bucket(BUCKET);
 
-console.log(`Seed idempotente completado en ${PROJECT_ID}.`);
-console.log(`Credenciales locales: ${credentialsPath}`);
-console.log('Usuarios DEV:');
-for (const user of userDefinitions) console.log(`- ${user.email} (${user.key})`);
+  console.log(`[preflight] Proyecto autorizado para Auth: ${PROJECT_ID}`);
+  await enablePasswordAuthentication();
+  const identities = await upsertUsers();
+  console.log(`[preflight] Proyecto autorizado para Storage: ${PROJECT_ID}`);
+  const manualFiles = await uploadFixtures(identities.primaryAdmin);
+  console.log(`[preflight] Proyecto autorizado para Firestore: ${PROJECT_ID}`);
+  await seedFirestore(identities, manualFiles);
+
+  console.log(`Seed idempotente completado en ${PROJECT_ID}.`);
+  console.log(`Credenciales locales: ${credentialsPath}`);
+  console.log('Usuarios DEV:');
+  for (const user of userDefinitions) console.log(`- ${user.email} (${user.key})`);
+} finally {
+  if (previousGoogleCredentials === undefined) delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  else process.env.GOOGLE_APPLICATION_CREDENTIALS = previousGoogleCredentials;
+  await unlink(temporaryAdcPath).catch(() => undefined);
+}
