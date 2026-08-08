@@ -16,16 +16,22 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: |
             package-lock.json
             functions/package-lock.json
+
+      - name: Setup Java 21 for Firebase emulators
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
 
       - name: Install frontend dependencies
         run: npm ci
