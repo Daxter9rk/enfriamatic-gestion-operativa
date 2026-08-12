@@ -35,7 +35,7 @@ No continúes si alguna puerta falla.
 Despliega backend y políticas antes del frontend:
 
 ```bash
-firebase deploy --project enfriamatic-operativa-dev --only firestore:rules,firestore:indexes,storage,functions
+firebase deploy --project enfriamatic-operativa-dev --only auth,firestore:rules,firestore:indexes,storage,functions
 npm run seed:dev -- --project enfriamatic-operativa-dev
 firebase hosting:channel:deploy full-v3 --project enfriamatic-operativa-dev --expires 7d
 firebase deploy --project enfriamatic-operativa-dev --only hosting

@@ -6,6 +6,12 @@
     "indexes": "firestore.indexes.json"
   },
   "storage": { "rules": "storage.rules" },
+  "auth": {
+    "providers": {
+      "anonymous": false,
+      "emailPassword": true
+    }
+  },
   "functions": [
     {
       "source": "functions",

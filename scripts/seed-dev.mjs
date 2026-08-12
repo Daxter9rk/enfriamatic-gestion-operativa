@@ -41,7 +41,6 @@ if (process.env.GCLOUD_PROJECT && process.env.GCLOUD_PROJECT !== PROJECT_ID) {
 
 const cliAuth = rootRequire('firebase-tools/lib/auth');
 const { requireAuth } = rootRequire('firebase-tools/lib/requireAuth');
-const cliApi = rootRequire('firebase-tools/lib/apiv2');
 const cliOAuth = rootRequire('firebase-tools/lib/api');
 
 const account = cliAuth.getGlobalDefaultAccount();
@@ -73,25 +72,6 @@ await writeFile(
 );
 const previousGoogleCredentials = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 process.env.GOOGLE_APPLICATION_CREDENTIALS = temporaryAdcPath;
-
-async function enablePasswordAuthentication() {
-  const accessToken = await cliApi.getAccessToken();
-  const response = await fetch(
-    `https://identitytoolkit.googleapis.com/admin/v2/projects/${PROJECT_ID}/config?updateMask=signIn.email.enabled,signIn.email.passwordRequired`,
-    {
-      method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'x-goog-user-project': PROJECT_ID,
-      },
-      body: JSON.stringify({ signIn: { email: { enabled: true, passwordRequired: true } } }),
-    },
-  );
-  if (!response.ok) {
-    throw new Error(`No fue posible habilitar Email/Password DEV (${response.status}).`);
-  }
-}
 
 let auth;
 let db;
@@ -622,7 +602,6 @@ try {
   bucket = getStorage().bucket(BUCKET);
 
   console.log(`[preflight] Proyecto autorizado para Auth: ${PROJECT_ID}`);
-  await enablePasswordAuthentication();
   const identities = await upsertUsers();
   console.log(`[preflight] Proyecto autorizado para Storage: ${PROJECT_ID}`);
   const manualFiles = await uploadFixtures(identities.primaryAdmin);
