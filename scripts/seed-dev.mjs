@@ -64,8 +64,8 @@ await writeFile(
   temporaryAdcPath,
   JSON.stringify({
     type: 'authorized_user',
-    client_id: cliOAuth.clientId,
-    client_secret: cliOAuth.clientSecret,
+    client_id: cliOAuth.clientId(),
+    client_secret: cliOAuth.clientSecret(),
     refresh_token: refreshToken,
   }),
   { encoding: 'utf8', mode: 0o600 },
